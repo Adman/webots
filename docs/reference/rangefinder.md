@@ -7,7 +7,7 @@ RangeFinder {
   SFFloat  fieldOfView 0.7854   # [0, 2*pi]
   SFInt32  width       64       # [0, inf)
   SFInt32  height      64       # [0, inf)
-  SFBool   spherical   FALSE    # {TRUE, FALSE}
+  SFString projection  "planar" # {"planar", "spherical", "cylindrical"}
   SFFloat  near        0.01     # [0, inf)
   SFFloat  minRange    0.01     # [near, maxRange]
   SFFloat  maxRange    1.0      # [minRange, inf)
@@ -19,6 +19,12 @@ RangeFinder {
 ```
 
 ### Description
+
+%figure "RangeFinder Coordinate System"
+
+![rangefinder.png](images/rangefinder.thumbnail.jpg)
+
+%end
 
 The [RangeFinder](#rangefinder) node is used to model a robot's on-board range-finder (depth camera).
 The resulting image can be displayed on the 3D window.
@@ -34,7 +40,7 @@ An object can be semi-transparent either if its texture has an alpha channel, or
 ### Field Summary
 
 - `fieldOfView`: horizontal field of view angle of the range-finder.
-The value is limited to the range 0 to &pi; radians if the `spherical` field is set to FALSE, otherwise there is no upper limit.
+The value is limited to the range 0 to &pi; radians if the `projection` field is set to "planar", otherwise there is no upper limit.
 Since range-finder pixels are squares, the vertical field of view can be computed from the `width`, `height` and horizontal `fieldOfView`:
 
     *vertical FOV = 2 * atan(tan(fieldOfView * 0.5) * (height / width))*
@@ -43,11 +49,10 @@ Since range-finder pixels are squares, the vertical field of view can be compute
 
 - `height`: height of the image in pixels
 
-- `spherical`: switch between a planar or a spherical projection.
-A spherical projection can be used for example to simulate a lidar device.
-More information on spherical projections is provided in the [spherical projection](camera.md#spherical-projection) section of the [Camera](camera.md) node.
+- `projection`: switch between a planar, a cylindrical or a spherical projection.
+More information on cylindrical projections is provided in the [projections](camera.md#spherical-and-cylindrical-projections) section of the [Camera](camera.md) node.
 
-- The `near` field defines the distance from the depth camera (used internally by the lidar) to the near clipping plane.
+- The `near` field defines the distance from the depth camera to the near clipping plane.
 Objects closer to the range-finder than the near value are not detected by the range-finder.
 This plane is parallel to the camera retina (i.e., projection plane).
 The near field determines the precision of the OpenGL depth buffer.
@@ -184,6 +189,8 @@ period = wb_range_finder_get_sampling_period(tag)
 *enable and disable range-finder updates*
 
 The `wb_range_finder_enable` function allows the user to enable range-finder updates.
+Once the range-finder is enabled, it will copy depth images from GPU memory to CPU memory at each time step, regardless of `wb_range_finder_get_range_image` calls.
+
 The `sampling_period` argument specifies the sampling period of the sensor and is expressed in milliseconds.
 Note that the first measurement will be available only after the first sampling period elapsed.
 
@@ -533,10 +540,13 @@ The `wb_range_finder_get_range_image` macro allows the user to read the contents
 The range image is computed using the depth buffer produced by the OpenGL rendering.
 Each pixel corresponds to the distance expressed in meter from the object to the plane defined by the equation *z = 0* within the coordinates system of the range-finder.
 The bounds of the range image is determined by the near clipping plane (defined by the `minRange` field) and the far clipping plane (defined by the `maxRange` field).
+Infinity will be returned for any depth lesser than the `minRange` value or greater than the `maxRange` value.
 The range image is coded as an array of single precision floating point values corresponding to the range value of each pixel of the image.
 The precision of the range-finder values decreases when the objects are located farther from the near clipping plane.
 Pixels are stored in scan lines running from left to right and from top to bottom.
 The memory chunk returned by this function shall not be freed, as it is managed by the range-finder internally.
+The contents of the image are subject to change between a call to `wb_robot_step_begin` and the subsequent call to `wb_robot_step_end`.
+As a result, if you want to access the image during a step, you should copy it before the step begins and access the copy.
 The size in bytes of the range image can be computed as follows:
 
 ```
@@ -558,8 +568,8 @@ Their content are identical but their handling is of course different.
 > `buffer` is significantly faster than `list`, and can easily be wrapped using external libraries such as NumPy:
 
 > ```python
-> image_bytes = range_finder.getRangeImage(data_type="buffer")
-> image_np = np.frombuffer(image_bytes, dtype=np.float32)
+> image_c_ptr = range_finder.getRangeImage(data_type="buffer")
+> image_np = np.ctypeslib.as_array(image_c_ptr, (range_finder.getWidth() * range_finder.getHeight(),))
 > ```
 
 ---
@@ -640,7 +650,7 @@ success = wb_range_finder_save_image(tag, 'filename', quality)
 
 *save a range-finder image in PNG, JPEG or HDR format*
 
-The `wb_range_finder_save_image` function allows the user to save a `tag` image which was previously obtained with the `wb_range_finder_get_image` function.
+The `wb_range_finder_save_image` function allows the user to save a `tag` image which was previously obtained with the `wb_range_finder_get_range_image` function.
 The image can be saved in a file using the PNG, JPEG, or HDR format.
 The image format is specified by the `filename` parameter.
 If `filename` is terminated by `.png`, the image format is PNG.
@@ -657,6 +667,8 @@ PNG and JPEG images are saved using an 8-bit RGB (grayscale) encoding.
 HDR images are saved as 32-bit floating-point single-channel images.
 For PNG and JPEG, depth data is stored in the range `0` to `255`.
 This depth data can thus be extracted for further use by reading the image file.
+
+`wb_range_finder_save_image` should not be called between a call to `wb_robot_step_begin` and the subsequent call to `wb_robot_step_end`, because the image is subject to change during that period.
 
 The return value of the `wb_range_finder_save_image` function is 0 in case of success.
 It is -1 in case of failure (unable to open the specified file or unrecognized image file extension).

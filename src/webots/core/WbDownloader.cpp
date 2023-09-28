@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,49 +16,65 @@
 
 #include "WbNetwork.hpp"
 
-#include <QtCore/QDir>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
 
-static int gCount = 0;
-static int gComplete = 0;
-
-int WbDownloader::progress() {
-  return gCount == 0 ? 100 : 100 * gComplete / gCount;
-}
-
-void WbDownloader::reset() {
-  gCount = 0;
-  gComplete = 0;
-}
-
-WbDownloader::WbDownloader(QObject *parent) : QObject(parent), mNetworkReply(NULL), mFinished(false) {
-  gCount++;
+WbDownloader::WbDownloader(const QUrl &url, const WbDownloader *existingDownload, QObject *parent) :
+  QObject(parent),
+  mUrl(url),
+  mNetworkReply(NULL),
+  mExistingDownload(existingDownload),
+  mFinished(false) {
 }
 
 WbDownloader::~WbDownloader() {
-  mNetworkReply->deleteLater();
+  if (mNetworkReply) {
+    mNetworkReply->deleteLater();
+
+    // properties used by WbDownloadManager
+    setProperty("url", mUrl);
+  }
+  setProperty("finished", mFinished);
 }
 
-QIODevice *WbDownloader::device() const {
-  return dynamic_cast<QIODevice *>(mNetworkReply);
-}
+void WbDownloader::download() {
+  if (mExistingDownload) {
+    if (!mExistingDownload->hasFinished())
+      connect(mExistingDownload->networkReply(), &QNetworkReply::finished, this, &WbDownloader::finished, Qt::UniqueConnection);
+    else
+      finished();
 
-void WbDownloader::download(const QUrl &url) {
-  mUrl = url;
+    return;
+  }
+
   QNetworkRequest request;
-  request.setUrl(url);
+  request.setUrl(mUrl);
   mFinished = false;
+
+  assert(mNetworkReply == NULL);
   mNetworkReply = WbNetwork::instance()->networkAccessManager()->get(request);
   connect(mNetworkReply, &QNetworkReply::finished, this, &WbDownloader::finished, Qt::UniqueConnection);
 }
 
 void WbDownloader::finished() {
-  assert(mNetworkReply);
-  if (mNetworkReply->error())
-    mError = tr("Cannot download %1: %2").arg(mUrl.toString()).arg(mNetworkReply->errorString());
-  disconnect(mNetworkReply, &QNetworkReply::finished, this, &WbDownloader::finished);
-  gComplete++;
+  // cache result
+  if (mNetworkReply) {
+    if (mNetworkReply->error()) {
+      mError = tr("Cannot download '%1', error code: %2: %3")
+                 .arg(mUrl.toString())
+                 .arg(mNetworkReply->error())
+                 .arg(mNetworkReply->errorString());
+    } else {  // only save to disk the primary download, copies don't need to
+      assert(mNetworkReply != NULL);
+      WbNetwork::instance()->save(mUrl.toString(), mNetworkReply->readAll());
+    }
+  }
+
   mFinished = true;
   emit complete();
 }
+
+void WbDownloader::abort() {
+  if (mNetworkReply)
+    mNetworkReply->abort();
+};

@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,30 +18,36 @@
 #include <QtCore/QObject>
 #include <QtCore/QUrl>
 
-class QNetworkReply;
 class QIODevice;
+class QNetworkReply;
 
 class WbDownloader : public QObject {
   Q_OBJECT
 public:
-  explicit WbDownloader(QObject *parent = NULL);
+  explicit WbDownloader(const QUrl &url, const WbDownloader *existingDownload, QObject *parent = NULL);
   ~WbDownloader();
-  void download(const QUrl &url);
+
+  void download();
+  void abort();
+
   const QUrl &url() const { return mUrl; }
   QIODevice *device() const;
-  bool hasFinished() const { return mFinished; }
   const QString &error() const { return mError; }
-  static int progress();
-  static void reset();
+  bool hasFinished() const { return mFinished; }
+
 signals:
   void complete();
-  void progress(float progress);
+
+protected:
+  QNetworkReply *networkReply() const { return mNetworkReply; }
 
 private:
   QUrl mUrl;
   QNetworkReply *mNetworkReply;
+  const WbDownloader *mExistingDownload;
   bool mFinished;
   QString mError;
+  bool mOffline;
 
 private slots:
   void finished();

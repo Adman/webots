@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,10 +19,8 @@
 // Description: classes allowing to store data related with the solid mouse dragging
 //
 
-#include "WbAbstractDragEvent.hpp"
-#include "WbDragTransformEvent.hpp"
-
 #include "WbAffinePlane.hpp"
+#include "WbDragPoseEvent.hpp"
 #include "WbRay.hpp"
 #include "WbVector3.hpp"
 
@@ -113,14 +111,14 @@ signals:
   void aborted();  // triggers drag destruction in WbView3D
 
 public slots:
-  void updateRenderingAndPhysics();
+  virtual void updateRenderingAndPhysics();
 
 protected:
   void init();
   void applyChangesToWren();
   virtual void applyToOde() = 0;
   virtual void updateOrigin() = 0;
-  virtual QString magnitudeString() = 0;
+  virtual QString magnitudeString() const = 0;
   WbSolid *mSelectedSolid;
   WbPhysicsVectorRepresentation *mRepresentation;
   WbVector3 mOrigin;
@@ -131,7 +129,6 @@ protected:
   WbRay mMouseRay;
   std::pair<bool, double> mIntersectionOutput;
   bool mIsLocked;
-  double mMagnitude;
   WbWrenLabelOverlay *mTextOverlay;
   QSize mWidgetSize;
   float mViewDistanceScaling;
@@ -151,7 +148,7 @@ private:
   static const double FORCE_SCALING_FACTOR;
   WbVector3 mRelativeOrigin;
   void updateOrigin() override;
-  QString magnitudeString() override;
+  QString magnitudeString() const override;
 };
 
 // WbDragTorqueEvent class
@@ -168,7 +165,7 @@ private:
   QPointer<WbSolidMerger> mSolidMerger;
   static const double TORQUE_SCALING_FACTOR;
   void updateOrigin() override;
-  QString magnitudeString() override;
+  QString magnitudeString() const override;
 };
 
 #endif

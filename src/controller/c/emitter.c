@@ -1,11 +1,11 @@
 /*
- * Copyright 1996-2021 Cyberbotics Ltd.
+ * Copyright 1996-2023 Cyberbotics Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -59,14 +59,16 @@ static void packet_destroy(Packet *ps) {
 }
 
 typedef struct {
-  int channel;           // current emitter's channel
-  int buffer_used;       // currently used buffer size
-  int buffer_size;       // max buffer size (as in Emitter node)
-  double byte_rate;      // max bytes sent per millisecond
-  double bytes_to_send;  // bytes count according to byte_rate and elapsed time since the packet was enqueued
-  Packet *queue;         // emission queue
-  double range;          // current range
-  double max_range;      // maximal range allowed
+  int channel;                // current emitter's channel
+  int buffer_used;            // currently used buffer size
+  int buffer_size;            // max buffer size (as in Emitter node)
+  double byte_rate;           // max bytes sent per millisecond
+  double bytes_to_send;       // bytes count according to byte_rate and elapsed time since the packet was enqueued
+  Packet *queue;              // emission queue
+  double range;               // current range
+  double max_range;           // maximal range allowed
+  int *allowed_channels;      // allowed channels emitter is allowed to emit to
+  int allowed_channels_size;  // size of allowed_channels array
   bool has_range_change;
   bool has_channel_changed;
 } Emitter;
@@ -81,6 +83,8 @@ static Emitter *emitter_create() {
   es->queue = NULL;
   es->range = -1;
   es->max_range = -1;
+  es->allowed_channels = NULL;
+  es->allowed_channels_size = -1;
   es->has_range_change = false;
   es->has_channel_changed = false;
   return es;
@@ -93,6 +97,7 @@ static void emitter_destroy(Emitter *es) {
     ps = ps->next;
     packet_destroy(garbage);
   }
+  free(es->allowed_channels);
   free(es);
 }
 
@@ -133,6 +138,10 @@ static void emitter_read_answer(WbDevice *d, WbRequest *r) {
       es->byte_rate = request_read_double(r);
       es->range = request_read_double(r);
       es->max_range = request_read_double(r);
+      es->allowed_channels_size = request_read_int32(r);
+      es->allowed_channels = (int *)malloc(es->allowed_channels_size * sizeof(int));
+      for (int i = 0; i < es->allowed_channels_size; i++)
+        es->allowed_channels[i] = request_read_int32(r);
       break;
     }
     case C_EMITTER_SET_CHANNEL: {
@@ -148,6 +157,14 @@ static void emitter_read_answer(WbDevice *d, WbRequest *r) {
     case C_EMITTER_SET_BUFFER_SIZE: {
       Emitter *es = d->pdata;
       es->buffer_size = request_read_int32(r);
+      break;
+    }
+    case C_EMITTER_SET_ALLOWED_CHANNELS: {
+      Emitter *es = d->pdata;
+      es->allowed_channels_size = request_read_int32(r);
+      es->allowed_channels = (int *)realloc(es->allowed_channels, es->allowed_channels_size * sizeof(int));
+      for (int i = 0; i < es->allowed_channels_size; i++)
+        es->allowed_channels[i] = request_read_int32(r);
       break;
     }
     default:
@@ -213,7 +230,7 @@ int wb_emitter_send(WbDeviceTag tag, const void *data, int size) {
   }
 
   int result = 0;
-  robot_mutex_lock_step();
+  robot_mutex_lock();
   WbDevice *d = emitter_get_device(tag);
   if (d) {
     Emitter *es = d->pdata;
@@ -223,33 +240,33 @@ int wb_emitter_send(WbDeviceTag tag, const void *data, int size) {
     }
   } else
     fprintf(stderr, "Error: %s(): invalid device tag.\n", __FUNCTION__);
-  robot_mutex_unlock_step();
+  robot_mutex_unlock();
   return result;
 }
 
 int wb_emitter_get_buffer_size(WbDeviceTag tag) {
   int result = -1;
-  robot_mutex_lock_step();
+  robot_mutex_lock();
   WbDevice *d = emitter_get_device(tag);
   if (d) {
     Emitter *es = d->pdata;
     result = es->buffer_size;
   } else
     fprintf(stderr, "Error: %s(): invalid device tag.\n", __FUNCTION__);
-  robot_mutex_unlock_step();
+  robot_mutex_unlock();
   return result;
 }
 
 int wb_emitter_get_channel(WbDeviceTag tag) {
   int result = -1;
-  robot_mutex_lock_step();
+  robot_mutex_lock();
   WbDevice *d = emitter_get_device(tag);
   if (d) {
     Emitter *es = d->pdata;
     result = es->channel;
   } else
     fprintf(stderr, "Error: %s(): invalid device tag.\n", __FUNCTION__);
-  robot_mutex_unlock_step();
+  robot_mutex_unlock();
   return result;
 }
 
@@ -260,26 +277,43 @@ void wb_emitter_set_channel(WbDeviceTag tag, int channel) {
     return;
   }
 
-  robot_mutex_lock_step();
+  robot_mutex_lock();
   WbDevice *d = emitter_get_device(tag);
   if (d) {
     Emitter *es = d->pdata;
-    es->channel = channel;
+    bool is_allowed = true;
+
+    if (es->allowed_channels_size > 0) {
+      is_allowed = false;
+      for (int i = 0; i < es->allowed_channels_size; i++) {
+        if (es->allowed_channels[i] == channel) {
+          is_allowed = true;
+          break;
+        }
+      }
+    }
+
+    if (!is_allowed)
+      fprintf(stderr,
+              "Error: %s() called with channel=%d, which is not between allowed channels. Please use an allowed channel.\n",
+              __FUNCTION__, channel);
+    else
+      es->channel = channel;
   } else
     fprintf(stderr, "Error: %s(): invalid device tag.\n", __FUNCTION__);
-  robot_mutex_unlock_step();
+  robot_mutex_unlock();
 }
 
 double wb_emitter_get_range(WbDeviceTag tag) {
   double result = NAN;
-  robot_mutex_lock_step();
+  robot_mutex_lock();
   WbDevice *d = emitter_get_device(tag);
   if (d) {
     Emitter *es = d->pdata;
     result = es->range;
   } else
     fprintf(stderr, "Error: %s(): invalid device tag.\n", __FUNCTION__);
-  robot_mutex_unlock_step();
+  robot_mutex_unlock();
   return result;
 }
 
@@ -288,7 +322,7 @@ void wb_emitter_set_range(WbDeviceTag tag, double range) {
     fprintf(stderr, "Error: %s(): invalid range=%f argument.\n", __FUNCTION__, range);
     return;
   }
-  robot_mutex_lock_step();
+  robot_mutex_lock();
   WbDevice *d = emitter_get_device(tag);
   if (d) {
     Emitter *es = d->pdata;
@@ -302,5 +336,5 @@ void wb_emitter_set_range(WbDeviceTag tag, double range) {
       es->range = range;  // normal case
   } else
     fprintf(stderr, "Error: %s(): invalid device tag.\n", __FUNCTION__);
-  robot_mutex_unlock_step();
+  robot_mutex_unlock();
 }

@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -35,9 +35,8 @@ public:
   // visibility flags and masks
   enum {
     // rendering triggered by mouse selection
-    VF_OUTLINE = 0x00000001,  // flag for bounding objects, axes and centers of mass, i.e. outlines that should not be rendered
-                              // by a WbCamera
-    VF_SELECTED_OUTLINE = 0x00000002,  // flag for selected outlines
+    VF_INVISIBLE_FROM_CAMERA = 0x00000002,  // flag for selected outlines and billboards
+
     // optional rendering from the menu (up to 30 flags)
     VF_ALL_BOUNDING_OBJECTS = 0x00000004,   // flag for the lines defining a bounding object
     VF_CAMERA_FRUSTUMS = 0x00000008,        // flag for camera frustum

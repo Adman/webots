@@ -4,26 +4,32 @@ Derived from [Device](device.md) and [Solid](solid.md).
 
 ```
 Lidar {
-  SFFloat  tiltAngle            0.0       # [-pi/2, pi/2]
-  SFInt32  horizontalResolution 512       # [0, inf)
-  SFFloat  fieldOfView          1.5708    # [0, 2*pi]
-  SFFloat  verticalFieldOfView  0.2       # [0, pi]
-  SFInt32  numberOfLayers       4         # [0, inf)
-  SFFloat  near                 0.01      # [0, inf)
-  SFFloat  minRange             0.01      # [near, inf)
-  SFFloat  maxRange             1.0       # [minRange, inf)
-  SFString type                 "fixed"   # {"fixed", "rotating"}
-  SFBool   spherical            TRUE      # {TRUE, FALSE}
-  SFFloat  noise                0.0       # [0, inf)
-  SFFloat  resolution           -1.0      # {-1, [0, inf)}
-  SFFloat  defaultFrequency     10        # [minFrequency, maxFrequency]
-  SFFloat  minFrequency         1         # [0, maxFrequency)
-  SFFloat  maxFrequency         25        # [minFrequency, inf)
-  SFNode   rotatingHead         NULL      # {Solid (or derived), PROTO}
+  SFFloat  tiltAngle            0.0           # [-pi/2, pi/2]
+  SFInt32  horizontalResolution 512           # [0, inf)
+  SFFloat  fieldOfView          1.5708        # [0, 2*pi]
+  SFFloat  verticalFieldOfView  0.2           # [0, pi]
+  SFInt32  numberOfLayers       4             # [0, inf)
+  SFFloat  near                 0.01          # [0, inf)
+  SFFloat  minRange             0.01          # [near, inf)
+  SFFloat  maxRange             1.0           # [minRange, inf)
+  SFString type                 "fixed"       # {"fixed", "rotating"}
+  SFString projection           "cylindrical" # {"planar", "cylindrical"}
+  SFFloat  noise                0.0           # [0, inf)
+  SFFloat  resolution           -1.0          # {-1, [0, inf)}
+  SFFloat  defaultFrequency     10            # [minFrequency, maxFrequency]
+  SFFloat  minFrequency         1             # [0, maxFrequency)
+  SFFloat  maxFrequency         25            # [minFrequency, inf)
+  SFNode   rotatingHead         NULL          # {Solid (or derived), PROTO}
 }
 ```
 
 ### Description
+
+%figure "Lidar Image"
+
+![lidar.png](images/lidar.thumbnail.jpg)
+
+%end
 
 The [Lidar](#lidar) node is used to model a robot's on-board lidar (laser-scanner).
 
@@ -138,7 +144,7 @@ With lidar devices, all the points are not acquired at the exact same time but r
 - The `horizontalResolution` field defines the number of points returned by layers.
 
 - The `fieldOfView` field defines the horizontal field of view angle of the lidar.
-The value is limited to the range 0 to &pi; radians if the `spherical` field is set to FALSE, otherwise there is no upper limit.
+The value is limited to the range 0 to &pi; radians if the `projection` field is set to "planar", otherwise there is no upper limit.
 
 - The `verticalFieldOfView` field defines the vertical repartition of the layers (angle between first and last layer).
 
@@ -161,9 +167,10 @@ If the range value is bigger than the `maxRange` value then infinity is returned
 
 - The `type` field should either be 'fixed' or 'rotating', it defines if the lidar has a rotating or fixed head.
 
-- The `spherical` field switches between a planar or a spherical projection.
-It is highly recommended to use the spherical projection in case of fixed-head lidar.
-More information on spherical projections is provided in the [spherical projection](camera.md#spherical-projection) section of the [Camera](camera.md) node.
+- `projection`: switch between a planar or a cylindrical projection.
+It is highly recommended to use the cylindrical projection in case of fixed-head lidar.
+More information on cylindrical projections is provided in the [projections](camera.md#spherical-and-cylindrical-projections) section of the [Camera](camera.md) node.
+The "spherical" projection is not available for a lidar device.
 
 - If the `noise` field is greater than 0.0, a gaussian noise is added to each depth value of a lidar image.
 A value of 0.0 corresponds to no noise and thus saves computation time.
@@ -183,11 +190,10 @@ The value of this field should be smaller or equal to the value of the `maxFrequ
 - A node can be inserted in the `rotatingHead` field to define the rotating head of the lidar.
 
 > **Note**: The fields `numberOfLayers`, `verticalFieldOfView`, `horizontalResolution` and `fieldOfView` should respect the following constraint in order to be able to simulate the lidar:
-
-        numberOfLayers < verticalFieldOfView * horizontalResolution / fieldOfView
-
-    In case of 'rotating' lidar, the `fieldOfView` term in the constraint is
-    replaced by `2 * &pi;`.
+> ```
+> numberOfLayers < verticalFieldOfView * horizontalResolution / fieldOfView
+> ```
+> In case of 'rotating' lidar, the `fieldOfView` term in the constraint is replaced by 2 * &pi;.
 
 #### Rotating Lidar
 
@@ -292,6 +298,8 @@ period = wb_lidar_get_sampling_period(tag)
 *enable and disable lidar updates*
 
 The `wb_lidar_enable` function allows the user to enable lidar updates.
+Once the lidar is enabled, it will copy range images from GPU memory to CPU memory at each time step, regardless of `wb_lidar_get_range_image` calls.
+
 The `sampling_period` argument specifies the sampling period of the sensor and is expressed in milliseconds.
 Note that the first measurement will be available only after the first sampling period elapsed.
 
@@ -481,14 +489,17 @@ range = wb_lidar_get_layer_range_image(tag, layer)
 
 ##### Description
 
-*get the range image and range image associate with a specific layer*
+*get the range image and range image associated with a specific layer*
 
 The `wb_lidar_get_range_image` function allows the user to read the contents of the last range image grabbed by a lidar.
+It should not be called if the lidar was in point cloud mode during the most recent step.
 The range image is computed using the depth buffer produced by the OpenGL rendering.
 The range image is coded as an array of single precision floating point values corresponding to the range value of each pixel of the image.
 The precision of the lidar values decreases when the objects are located farther from the near clipping plane.
 Pixels are stored in scan lines running from left to right and from first to last layer.
 The memory chunk returned by this function shall not be freed, as it is managed by the lidar internally.
+The contents of the image are subject to change between a call to `wb_robot_step_begin` and the subsequent call to `wb_robot_step_end`.
+As a result, if you want to access the image during a step, you should copy it before the step begins and access the copy.
 The size in bytes of the range image can be computed as follows:
 
 ```
@@ -547,7 +558,7 @@ from controller import Lidar
 
 class Lidar (Device):
     def getPointCloud(self, data_type='list'):
-    def getLayerPointCloud(self, layer):
+    def getLayerPointCloud(self, layer, data_type='list'):
     def getNumberOfPoints(self):
     # ...
 ```
@@ -584,7 +595,7 @@ number_of_points = wb_lidar_get_number_of_points(tag)
 | name | service/topic | data type | data type definition |
 | --- | --- | --- | --- |
 | `/<device_name>/point_cloud` | `topic` | [`sensor_msgs::PointCloud`](http://docs.ros.org/api/sensor_msgs/html/msg/PointCloud.html) | [`Header`](http://docs.ros.org/api/std_msgs/html/msg/Header.html) `header`<br/>[`geometry_msgs/Point32[]`](http://docs.ros.org/api/geometry_msgs/html/msg/Point32.html) `points`<br/>[`sensor_msgs/ChannelFloat32[]`](http://docs.ros.org/api/sensor_msgs/html/msg/ChannelFloat32.html) `channels`<br/>Note: the first channel is filled with the corresponding layer id. |
-| `/<device_name>/laser_scan/layer<X>` | `topic` | [`sensor_msgs::LaserScan`](http://docs.ros.org/api/sensor_msgs/html/msg/LaserScan.html) | [`Header`](http://docs.ros.org/api/std_msgs/html/msg/Header.html) `header`<br/>`float32 angle_min`<br/>`float32 angle_max`<br/>`float32 angle_increment`<br/>`float32 time_increment`<br/>`float32 scan_time`<br/>`float32 range_min`<br/>`float32 range_max`<br/>`float32[] ranges`<br/>`float32[] intensities` |
+| `/<device_name>/laser_scan (only present if the lidar has exactly one layer)` | `topic` | [`sensor_msgs::LaserScan`](http://docs.ros.org/api/sensor_msgs/html/msg/LaserScan.html) | [`Header`](http://docs.ros.org/api/std_msgs/html/msg/Header.html) `header`<br/>`float32 angle_min`<br/>`float32 angle_max`<br/>`float32 angle_increment`<br/>`float32 time_increment`<br/>`float32 scan_time`<br/>`float32 range_min`<br/>`float32 range_max`<br/>`float32[] ranges`<br/>`float32[] intensities` |
 | `/<device_name>/get_layer_point_cloud` | `service` | `webots_ros::lidar_get_layer_point_cloud` | `int32 layer`<br/>`---`<br/>[`sensor_msgs::PointCloud`](http://docs.ros.org/api/sensor_msgs/html/msg/PointCloud.html) pointCloud |
 
 %tab-end
@@ -596,6 +607,7 @@ number_of_points = wb_lidar_get_number_of_points(tag)
 *get the points array, points array associate with a specific layer and total number of point*
 
 The `wb_lidar_get_point_cloud` function returns the pointer to the point cloud array, each point consists of a [`WbLidarPoint`](#wblidarpoint).
+It should not be called unless the lidar was in point cloud mode during the most recent step.
 The memory chunk returned by this function shall not be freed, as it is managed by the lidar internally.
 The size in bytes of the point cloud can be computed as follows:
 
@@ -604,12 +616,14 @@ size = lidar_number_of_points * sizeof(WbLidarPoint)
 ```
 
 Attempting to read outside the bounds of this memory chunk will cause an error.
+The contents of the point cloud are subject to change between a call to `wb_robot_step_begin` and the subsequent call to `wb_robot_step_end`.
+As a result, if you want to access the point cloud during a step, you should copy it before the step begins and access the copy.
 
 The `wb_lidar_get_layer_point_cloud` function is a convenient way of getting directly the sub point cloud associated with one layer.
 
 The `wb_lidar_get_number_of_points` function returns the total number of points contained in the point cloud (each layer is assumed to have the same number of points associated to).
 
-> **Note** [Python]: The `getPointCloud` method has `data_type` parameter which can be `list` (default) or `buffer`.
+> **Note** [Python]: The `getPointCloud` and `getLayerPointCloud` methods have `data_type` parameter which can be `list` (default) or `buffer`.
 If `data_type` is equal to `list` then the function returns a list of points, but it is slow as it has to create a list of objects.
 If `data_type` is equal to `buffer` then the function returns `bytearray` and it is fast as there is no memory copying.
 
@@ -890,7 +904,7 @@ The `wb_lidar_get_min_frequency` and `wb_lidar_get_max_frequency` functions retu
 #include <webots/lidar.h>
 
 double wb_lidar_get_fov(WbDeviceTag tag);
-int wb_lidar_get_vertical_fov(WbDeviceTag tag);
+double wb_lidar_get_vertical_fov(WbDeviceTag tag);
 ```
 
 %tab-end

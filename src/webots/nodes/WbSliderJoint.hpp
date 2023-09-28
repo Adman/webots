@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -41,21 +41,21 @@ public:
 
   // return the axis of the joint with coordinates relative to the parent Solid; defaults to unit z-axis
   WbVector3 axis() const override;
+  void updateEndPointZeroTranslationAndRotation() override;
 
 public slots:
   bool setJoint() override;
+  void updatePosition() override;
 
 protected:
   WbLinearMotor *linearMotor() const;
   void updatePosition(double position) override;
   WbVector3 anchor() const override;
-  void updateEndPointZeroTranslationAndRotation() override;
   void applyToOdeSpringAndDampingConstants(dBodyID body, dBodyID parentBody) override;
 
-  void writeExport(WbVrmlWriter &writer) const override;
+  void writeExport(WbWriter &writer) const override;
 
 protected slots:
-  void updatePosition() override;
   void updateParameters() override;
   void updateMinAndMaxStop(double min, double max) override;
 

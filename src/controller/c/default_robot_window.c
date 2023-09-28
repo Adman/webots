@@ -1,11 +1,11 @@
 /*
- * Copyright 1996-2021 Cyberbotics Ltd.
+ * Copyright 1996-2023 Cyberbotics Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,6 +24,7 @@
 #include <webots/plugins/robot_window/default.h>
 
 #include <webots/accelerometer.h>
+#include <webots/altimeter.h>
 #include <webots/camera.h>
 #include <webots/compass.h>
 #include <webots/distance_sensor.h>
@@ -40,6 +41,7 @@
 #include <webots/robot.h>
 #include <webots/supervisor.h>
 #include <webots/touch_sensor.h>
+#include <webots/vacuum_gripper.h>
 
 #include <assert.h>
 #include <stdio.h>
@@ -164,11 +166,13 @@ static double update_period_by_type(WbNodeType type) {
 static double number_of_components(WbDeviceTag tag) {
   WbNodeType type = wb_device_get_node_type(tag);
   switch (type) {
+    case WB_NODE_ALTIMETER:
     case WB_NODE_DISTANCE_SENSOR:
     case WB_NODE_POSITION_SENSOR:
     case WB_NODE_LIGHT_SENSOR:
     case WB_NODE_LINEAR_MOTOR:
     case WB_NODE_ROTATIONAL_MOTOR:
+    case WB_NODE_VACUUM_GRIPPER:
       return 1;
     case WB_NODE_ACCELEROMETER:
     case WB_NODE_COMPASS:
@@ -206,6 +210,7 @@ static void ue_append(struct UpdateElement *ue, double update_time, const double
   if (value == NULL)
     return;
 
+  const int last_index = ue->n_values;
   ue->n_values++;
   if (ue->values == NULL)
     ue->values = (double **)malloc(sizeof(double *));
@@ -215,11 +220,11 @@ static void ue_append(struct UpdateElement *ue, double update_time, const double
     ue->times = (double *)malloc(sizeof(double));
   else
     ue->times = (double *)realloc(ue->times, ue->n_values * sizeof(double));
-  int last_index = ue->n_values - 1;
   ue->values[last_index] = malloc(ue->n_components * sizeof(double *));
   ue->times[last_index] = update_time;
   int v;
   for (v = 0; v < ue->n_components; ++v)
+    // cppcheck-suppress objectIndex
     ue->values[last_index][v] = value[v];
 }
 
@@ -429,9 +434,7 @@ static void touch_sensor_configure(WbDeviceTag tag) {
 }
 
 void wbu_default_robot_window_configure() {
-  buffer_append("configure {\"type\":\"");
-  buffer_append(wb_node_get_name(wb_robot_get_type()));
-  buffer_append("\",\"name\":\"");
+  buffer_append("configure {\"name\":\"");
   buffer_append_escaped_string(wb_robot_get_name());
   buffer_append("\",\"model\":\"");
   buffer_append_escaped_string(wb_robot_get_model());
@@ -657,6 +660,13 @@ static void accelerometer_collect_value(WbDeviceTag tag, struct UpdateElement *u
   ue_append(ue, update_time, values);
 }
 
+static void altimeter_collect_value(WbDeviceTag tag, struct UpdateElement *ue, double update_time) {
+  if (wb_altimeter_get_sampling_period(tag) <= 0)
+    return;
+  const double value = wb_altimeter_get_value(tag);
+  ue_append(ue, update_time, &value);
+}
+
 static void compass_collect_value(WbDeviceTag tag, struct UpdateElement *ue, double update_time) {
   if (wb_compass_get_sampling_period(tag) <= 0)
     return;
@@ -740,6 +750,22 @@ static void touch_sensor_collect_value(WbDeviceTag tag, struct UpdateElement *ue
   }
 }
 
+static void vacuum_gripper_collect_value(WbDeviceTag tag, struct UpdateElement *ue, double update_time) {
+  if (wb_vacuum_gripper_get_presence_sampling_period(tag) <= 0)
+    return;
+  const double value = wb_vacuum_gripper_get_presence(tag) ? 1.0 : 0.0;
+  ue_append(ue, update_time, &value);
+}
+
+static void vacuum_gripper_update(WbDeviceTag tag, struct UpdateElement *ue) {
+  if (wb_vacuum_gripper_get_presence_sampling_period(tag) > 0) {
+    ue_write_values(ue);
+    buffer_append(",");
+  }
+  buffer_append("\"vacuumGripperOn\":");
+  buffer_append(wb_vacuum_gripper_is_on(tag) ? "true" : "false");
+}
+
 void wbu_default_robot_window_update() {
   if (buffer != NULL)
     return;  // prevent to mix 2 updates.
@@ -774,6 +800,9 @@ void wbu_default_robot_window_update() {
         case WB_NODE_ACCELEROMETER:
           accelerometer_collect_value(tag, update_element, simulated_time);
           break;
+        case WB_NODE_ALTIMETER:
+          altimeter_collect_value(tag, update_element, simulated_time);
+          break;
         case WB_NODE_COMPASS:
           compass_collect_value(tag, update_element, simulated_time);
           break;
@@ -798,6 +827,9 @@ void wbu_default_robot_window_update() {
         case WB_NODE_TOUCH_SENSOR:
           touch_sensor_collect_value(tag, update_element, simulated_time);
           break;
+        case WB_NODE_VACUUM_GRIPPER:
+          vacuum_gripper_collect_value(tag, update_element, simulated_time);
+          break;
         default:
           break;
       }
@@ -814,6 +846,7 @@ void wbu_default_robot_window_update() {
         buffer_append("\":{");
         switch (type) {
           case WB_NODE_ACCELEROMETER:
+          case WB_NODE_ALTIMETER:
           case WB_NODE_COMPASS:
           case WB_NODE_DISTANCE_SENSOR:
           case WB_NODE_GPS:
@@ -837,6 +870,9 @@ void wbu_default_robot_window_update() {
             break;
           case WB_NODE_RANGE_FINDER:
             range_finder_update(tag);
+            break;
+          case WB_NODE_VACUUM_GRIPPER:
+            vacuum_gripper_update(tag, update_element);
             break;
           default:
             break;

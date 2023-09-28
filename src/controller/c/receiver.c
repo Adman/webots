@@ -1,11 +1,11 @@
 /*
- * Copyright 1996-2021 Cyberbotics Ltd.
+ * Copyright 1996-2023 Cyberbotics Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -57,14 +57,16 @@ static void packet_destroy(PacketStruct *ps) {
 }
 
 typedef struct {
-  int enable : 1;       // need to enable device ?
-  int set_channel : 1;  // need to change receiver's channel ?
-  int sampling_period;  // milliseconds
-  int channel;          // receiver's channel
-  PacketStruct *queue;  // reception queue
-  int queue_length;     // number of packets in the reception queue
-  int buffer_size;      // reception buffer size (as in Receiver.bufferSize)
-  int buffer_used;      // sum of all packet data size
+  int enable : 1;             // need to enable device ?
+  int set_channel : 1;        // need to change receiver's channel ?
+  int sampling_period;        // milliseconds
+  int channel;                // receiver's channel
+  int *allowed_channels;      // allowed channels receiver is allowed to listen to
+  PacketStruct *queue;        // reception queue
+  int queue_length;           // number of packets in the reception queue
+  int buffer_size;            // reception buffer size (as in Receiver.bufferSize)
+  int buffer_used;            // sum of all packet data size
+  int allowed_channels_size;  // size of allowed_channels array
 } Receiver;
 
 static Receiver *receiver_create() {
@@ -73,10 +75,12 @@ static Receiver *receiver_create() {
   rs->set_channel = false;
   rs->sampling_period = 0;
   rs->channel = -1;
+  rs->allowed_channels = NULL;
   rs->queue = NULL;
   rs->queue_length = 0;
   rs->buffer_size = -1;
   rs->buffer_used = 0;
+  rs->allowed_channels_size = -1;
   return rs;
 }
 
@@ -108,7 +112,9 @@ static void receiver_enqueue(Receiver *rs, PacketStruct *ps) {
 static PacketStruct *receiver_dequeue(Receiver *rs) {
   ROBOT_ASSERT(rs->queue);
   PacketStruct *ps = rs->queue;
+  // cppcheck-suppress nullPointerRedundantCheck
   rs->queue = rs->queue->next;
+  // cppcheck-suppress nullPointerRedundantCheck
   rs->buffer_used -= ps->size;
   rs->queue_length--;
   return ps;
@@ -127,6 +133,10 @@ static void receiver_read_answer(WbDevice *d, WbRequest *r) {
     case C_CONFIGURE:
       rs->buffer_size = request_read_int32(r);
       rs->channel = request_read_int32(r);
+      rs->allowed_channels_size = request_read_int32(r);
+      rs->allowed_channels = (int *)realloc(rs->allowed_channels, rs->allowed_channels_size * sizeof(int));
+      for (int i = 0; i < rs->allowed_channels_size; i++)
+        rs->allowed_channels[i] = request_read_int32(r);
       break;
 
     case C_RECEIVER_RECEIVE: {
@@ -175,6 +185,7 @@ static void receiver_write_request(WbDevice *d, WbRequest *r) {
 static void receiver_cleanup(WbDevice *d) {
   Receiver *rs = d->pdata;
   receiver_empty_queue(rs);
+  free(rs->allowed_channels);
   free(rs);
 }
 
@@ -194,7 +205,7 @@ void wb_receiver_enable(WbDeviceTag tag, int sampling_period) {
     fprintf(stderr, "Error: %s() called with negative sampling period.\n", __FUNCTION__);
     return;
   }
-  robot_mutex_lock_step();
+  robot_mutex_lock();
   Receiver *rs = receiver_get_struct(tag);
   if (!rs)
     fprintf(stderr, "Error: %s(): invalid device tag.\n", __FUNCTION__);
@@ -202,7 +213,7 @@ void wb_receiver_enable(WbDeviceTag tag, int sampling_period) {
     rs->enable = true;
     rs->sampling_period = sampling_period;
   }
-  robot_mutex_unlock_step();
+  robot_mutex_unlock();
 }
 
 void wb_receiver_disable(WbDeviceTag tag) {
@@ -215,14 +226,14 @@ void wb_receiver_disable(WbDeviceTag tag) {
 
 int wb_receiver_get_sampling_period(WbDeviceTag tag) {
   int sampling_period;
-  robot_mutex_lock_step();
+  robot_mutex_lock();
   Receiver *rs = receiver_get_struct(tag);
   if (!rs) {
     fprintf(stderr, "Error: %s(): invalid device tag.\n", __FUNCTION__);
     sampling_period = 0;
   } else
     sampling_period = rs->sampling_period;
-  robot_mutex_unlock_step();
+  robot_mutex_unlock();
   return sampling_period;
 }
 
@@ -233,43 +244,61 @@ void wb_receiver_set_channel(WbDeviceTag tag, int channel) {
     return;
   }
 
-  robot_mutex_lock_step();
+  robot_mutex_lock();
   Receiver *rs = receiver_get_struct(tag);
   if (!rs)
     fprintf(stderr, "Error: %s(): invalid device tag.\n", __FUNCTION__);
   else if (channel != rs->channel) {
-    rs->set_channel = true;
-    rs->channel = channel;
+    bool is_allowed = true;
+
+    if (rs->allowed_channels_size > 0) {
+      is_allowed = false;
+      for (int i = 0; i < rs->allowed_channels_size; i++) {
+        if (rs->allowed_channels[i] == channel) {
+          is_allowed = true;
+          break;
+        }
+      }
+    }
+
+    if (!is_allowed)
+      fprintf(stderr,
+              "Error: %s() called with channel=%d, which is not between allowed channels. Please use an allowed channel.\n",
+              __FUNCTION__, channel);
+    else {
+      rs->set_channel = true;
+      rs->channel = channel;
+    }
   }
-  robot_mutex_unlock_step();
+  robot_mutex_unlock();
 }
 
 int wb_receiver_get_channel(WbDeviceTag tag) {
   int result;
-  robot_mutex_lock_step();
+  robot_mutex_lock();
   Receiver *rs = receiver_get_struct(tag);
   if (!rs) {
     fprintf(stderr, "Error: %s(): invalid device tag.\n", __FUNCTION__);
     result = -1;
   } else
     result = rs->channel;
-  robot_mutex_unlock_step();
+  robot_mutex_unlock();
   return result;
 }
 
 void wb_receiver_next_packet(WbDeviceTag tag) {
-  robot_mutex_lock_step();
+  robot_mutex_lock();
   Receiver *rs = receiver_get_struct(tag);
   if (!rs)
     fprintf(stderr, "Error: %s(): invalid device tag.\n", __FUNCTION__);
   else if (rs->queue)
     packet_destroy(receiver_dequeue(rs));
-  robot_mutex_unlock_step();
+  robot_mutex_unlock();
 }
 
 int wb_receiver_get_queue_length(WbDeviceTag tag) {
   int result;
-  robot_mutex_lock_step();
+  robot_mutex_lock();
   Receiver *rs = receiver_get_struct(tag);
   if (!rs) {
     fprintf(stderr, "Error: %s(): invalid device tag.\n", __FUNCTION__);
@@ -279,13 +308,13 @@ int wb_receiver_get_queue_length(WbDeviceTag tag) {
       fprintf(stderr, "Error: %s() called for a disabled device! Please use: wb_receiver_enable().\n", __FUNCTION__);
     result = rs->queue_length;
   }
-  robot_mutex_unlock_step();
+  robot_mutex_unlock();
   return result;
 }
 
 int wb_receiver_get_data_size(WbDeviceTag tag) {
   int result;
-  robot_mutex_lock_step();
+  robot_mutex_lock();
   Receiver *rs = receiver_get_struct(tag);
   if (!rs) {
     fprintf(stderr, "Error: %s(): invalid device tag.\n", __FUNCTION__);
@@ -296,13 +325,13 @@ int wb_receiver_get_data_size(WbDeviceTag tag) {
     fprintf(stderr, "Error: %s(): the receiver queue is empty.\n", __FUNCTION__);
     result = -1;
   }
-  robot_mutex_unlock_step();
+  robot_mutex_unlock();
   return result;
 }
 
 const void *wb_receiver_get_data(WbDeviceTag tag) {
   const void *result;
-  robot_mutex_lock_step();
+  robot_mutex_lock();
   Receiver *rs = receiver_get_struct(tag);
   if (!rs) {
     fprintf(stderr, "Error: %s(): invalid device tag.\n", __FUNCTION__);
@@ -313,13 +342,13 @@ const void *wb_receiver_get_data(WbDeviceTag tag) {
     fprintf(stderr, "Error: %s(): the receiver queue is empty.\n", __FUNCTION__);
     result = NULL;
   }
-  robot_mutex_unlock_step();
+  robot_mutex_unlock();
   return result;
 }
 
 const double *wb_receiver_get_emitter_direction(WbDeviceTag tag) {
   const double *result;
-  robot_mutex_lock_step();
+  robot_mutex_lock();
   Receiver *rs = receiver_get_struct(tag);
   if (!rs) {
     fprintf(stderr, "Error: %s(): invalid device tag.\n", __FUNCTION__);
@@ -330,13 +359,13 @@ const double *wb_receiver_get_emitter_direction(WbDeviceTag tag) {
     fprintf(stderr, "Error: %s(): the receiver queue is empty.\n", __FUNCTION__);
     result = NULL;
   }
-  robot_mutex_unlock_step();
+  robot_mutex_unlock();
   return result;
 }
 
 double wb_receiver_get_signal_strength(WbDeviceTag tag) {
   double result;
-  robot_mutex_lock_step();
+  robot_mutex_lock();
   Receiver *rs = receiver_get_struct(tag);
   if (!rs) {
     fprintf(stderr, "Error: %s(): invalid device tag.\n", __FUNCTION__);
@@ -347,6 +376,6 @@ double wb_receiver_get_signal_strength(WbDeviceTag tag) {
     fprintf(stderr, "Error: %s(): the receiver queue is empty.\n", __FUNCTION__);
     result = NAN;
   }
-  robot_mutex_unlock_step();
+  robot_mutex_unlock();
   return result;
 }

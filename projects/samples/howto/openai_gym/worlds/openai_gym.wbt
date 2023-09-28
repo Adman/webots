@@ -1,14 +1,22 @@
-#VRML_SIM R2021b utf8
+#VRML_SIM R2023b utf8
+
+EXTERNPROTO "webots://projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "webots://projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "webots://projects/robots/adept/pioneer3/protos/Pioneer3at.proto"
+EXTERNPROTO "webots://projects/appearances/protos/CorrodedMetal.proto"
+EXTERNPROTO "webots://projects/appearances/protos/OsbWood.proto"
+EXTERNPROTO "webots://projects/objects/floors/protos/Floor.proto"
+EXTERNPROTO "webots://projects/appearances/protos/Parquetry.proto"
+
 WorldInfo {
   info [
     "This example shows an integration of OpenAI Gym with Webots."
   ]
   title "OpenAI Gym Environment"
-  coordinateSystem "NUE"
 }
 Viewpoint {
-  orientation 0.042679810423980585 0.9980594209305432 0.04534121826728663 4.649996506160134
-  position -5.285325516084478 1.1935691264549704 -0.26959367167584314
+  orientation 0.039620786212746346 0.046648105252169975 -0.9981253165691502 1.6348167552564403
+  position 0.325429139559551 4.811657001240169 0.6473423548515526
 }
 TexturedBackground {
 }
@@ -20,7 +28,8 @@ Pioneer3at {
   extensionSlot [
     HingeJoint {
       jointParameters HingeJointParameters {
-        anchor 0 0.1 0
+        axis 0 1 0
+        anchor 0 0 0.21
         minStop -1
         maxStop 1
       }
@@ -29,11 +38,10 @@ Pioneer3at {
         }
       ]
       endPoint Solid {
-        translation 0 0.4000000000001557 2.138263524575912e-15
-        rotation 1 0 0 0
+        translation 0 0 0.51
         children [
           DEF POLE_ENDPOINT Solid {
-            translation 0 0.26 0
+            translation 0 0 0.26
             children [
               DEF BALL_SHAPE Shape {
                 appearance CorrodedMetal {

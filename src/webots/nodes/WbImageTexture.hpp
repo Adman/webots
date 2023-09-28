@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,10 +20,13 @@
 
 #include <QtCore/QSet>
 
+#include <assimp/material.h>
+
 class WbRgb;
 class WbDownloader;
 
 class QImage;
+class QIODevice;
 
 struct WrMaterial;
 struct WrTexture;
@@ -37,6 +40,7 @@ public:
   explicit WbImageTexture(WbTokenizer *tokenizer = NULL);
   WbImageTexture(const WbImageTexture &other);
   explicit WbImageTexture(const WbNode &other);
+  WbImageTexture(const aiMaterial *material, aiTextureType textureType, const QString &parentPath);
   virtual ~WbImageTexture();
 
   // reimplemented public functions
@@ -46,7 +50,7 @@ public:
   void postFinalize() override;
 
   // specific functions
-  void pickColor(WbRgb &pickedColor, const WbVector2 &uv);
+  void pickColor(const WbVector2 &uv, WbRgb &pickedColor);
 
   // WREN
   virtual const WrTexture *wrenTexture() const { return mWrenTexture; }
@@ -62,19 +66,20 @@ public:
   void setBackgroundTexture(WrTexture *backgroundTexture);
   void unsetBackgroundTexture();
 
-  const QString path(bool warning = false) const;
+  const QString path() const;
 
   void setRole(const QString &role) { mRole = role; }
 
-  void write(WbVrmlWriter &writer) const override;
+  void exportShallowNode(const WbWriter &writer) const;
+
+  QStringList fieldsToSynchronizeWithX3D() const override;
 
 signals:
   void changed();
 
 protected:
-  bool exportNodeHeader(WbVrmlWriter &writer) const override;
-  void exportNodeFields(WbVrmlWriter &writer) const override;
-  void exportNodeSubNodes(WbVrmlWriter &writer) const override;
+  bool exportNodeHeader(WbWriter &writer) const override;
+  void exportNodeFields(WbWriter &writer) const override;
 
 private:
   // user accessible fields
@@ -94,7 +99,6 @@ private:
   WbVector2 mExternalTextureRatio;
   const unsigned char *mExternalTextureData;
 
-  QString mContainerField;
   QImage *mImage;
   int mUsedFiltering;
   bool mIsMainTextureTransparent;
@@ -104,13 +108,12 @@ private:
   WbImageTexture &operator=(const WbImageTexture &);  // non copyable
   WbNode *clone() const override { return new WbImageTexture(*this); }
   void init();
+  void initFields();
   void updateWrenTexture();
   void applyTextureParams();
   void destroyWrenTexture();
   bool loadTexture();
   bool loadTextureData(QIODevice *device);
-
-  static QSet<QString> cQualityChangedTexturesList;
 
 private slots:
   void updateUrl();

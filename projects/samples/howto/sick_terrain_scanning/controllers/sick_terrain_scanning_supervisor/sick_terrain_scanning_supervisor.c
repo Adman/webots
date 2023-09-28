@@ -1,11 +1,11 @@
 /*
- * Copyright 1996-2021 Cyberbotics Ltd.
+ * Copyright 1996-2023 Cyberbotics Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -35,7 +35,7 @@
 
 // size of the ground
 #define GROUND_X 100
-#define GROUND_Z 100
+#define GROUND_Y 100
 
 static WbDeviceTag display, display2;
 static WbImageRef background, background2;
@@ -101,7 +101,7 @@ int main() {
   int laser_width;
 
   // set the background (otherwise an empty ground is displayed at this step)
-  background = wb_display_image_load(display, "dirty.png");
+  background = wb_display_image_load(display, "dirty.jpg");
   wb_display_image_paste(display, background, 0, 0, false);
   background2 = wb_display_image_load(display2, "grid_display.png");
   wb_display_image_paste(display2, background2, 0, 0, false);
@@ -125,8 +125,10 @@ int main() {
     for (i = 0; i < laser_width; i++) {
       if (buffer[i] > 25)  // range up to 25 metres
         buffer[i] = 25;
-      pxfill[i] = width * (translation[X] + GROUND_X / 2 + sin(rotation[3] - pi / 2 - i * pi / 180) * buffer[i]) / GROUND_X;
-      pyfill[i] = height * (translation[Z] + GROUND_Z / 2 + cos(rotation[3] - pi / 2 - i * pi / 180) * buffer[i]) / GROUND_Z;
+      pxfill[i] =
+        width * (translation[X] + GROUND_X / 2 + sin(rotation[3] + (laser_width - i) * pi / 180) * buffer[i]) / GROUND_X;
+      pyfill[i] =
+        height * (-translation[Y] + GROUND_Y / 2 + cos(rotation[3] + (laser_width - i) * pi / 180) * buffer[i]) / GROUND_Y;
     }
 
     wb_display_fill_polygon(display, pxfill, pyfill, 180);

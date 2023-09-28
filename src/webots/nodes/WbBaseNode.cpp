@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,11 +16,13 @@
 #include "WbBasicJoint.hpp"
 #include "WbBoundingSphere.hpp"
 #include "WbDictionary.hpp"
+#include "WbField.hpp"
 #include "WbNodeOperations.hpp"
 #include "WbNodeUtilities.hpp"
 #include "WbSolid.hpp"
 #include "WbStandardPaths.hpp"
 #include "WbTemplateManager.hpp"
+#include "WbTransform.hpp"
 #include "WbViewpoint.hpp"
 #include "WbWorld.hpp"
 #include "WbWrenOpenGlContext.hpp"
@@ -34,16 +36,19 @@ void WbBaseNode::init() {
   mOdeObjectsCreatedCalled = false;
   mWrenNode = NULL;
   mIsInBoundingObject = false;
-  mUpperTransform = NULL;
+  mUpperPose = NULL;
   mUpperSolid = NULL;
   mTopSolid = NULL;
   mBoundingObjectFirstTimeSearch = true;
+  mUpperPoseFirstTimeSearch = true;
   mUpperTransformFirstTimeSearch = true;
   mUpperSolidFirstTimeSearch = true;
   mTopSolidFirstTimeSearch = true;
   mFinalizationCanceled = false;
   mNodeUse = WbNode::UNKNOWN_USE;
   mNodeUseDirty = true;
+
+  connect(this, &WbNode::parameterChanged, WbNodeOperations::instance(), &WbNodeOperations::updateExternProtoDeclarations);
 }
 
 WbBaseNode::WbBaseNode(const QString &modelName, WbTokenizer *tokenizer) :
@@ -59,6 +64,13 @@ WbBaseNode::WbBaseNode(const WbNode &other) : WbNode(other) {
   init();
 }
 
+// special constructor for shallow nodes, it's used by CadShape to instantiate PBRAppearances from an assimp material in
+// order to configure the WREN materials. Shallow nodes are invisible but persistent, and due to their incompleteness should not
+// be modified or interacted with in any other way other than through the creation and destruction of CadShape nodes
+WbBaseNode::WbBaseNode(const QString &modelName) : WbNode(modelName) {
+  init();
+}
+
 WbBaseNode::~WbBaseNode() {
   emit isBeingDestroyed(this);
   if (mPostFinalizeCalled && !defName().isEmpty() && !WbWorld::instance()->isCleaning() && !WbTemplateManager::isRegenerating())
@@ -66,6 +78,8 @@ WbBaseNode::~WbBaseNode() {
 }
 
 void WbBaseNode::finalize() {
+  finalizeProtoParametersRedirection();
+
   if (isProtoParameterNode()) {
     // finalize PROTO parameter node instances of the current node
     QVector<WbNode *> nodeInstances = protoParameterNodeInstances();
@@ -146,20 +160,6 @@ void WbBaseNode::createWrenObjects() {
     mWrenNode = wr_scene_get_root(wr_scene_get_instance());
 }
 
-void WbBaseNode::updateContextDependentObjects() {
-  if (isProtoParameterNode()) {
-    // update context of PROTO parameter node instances
-    // this has no WREN objects to be updated
-    QVector<WbNode *> nodeInstances = protoParameterNodeInstances();
-    foreach (WbNode *nodeInstance, nodeInstances) { static_cast<WbBaseNode *>(nodeInstance)->updateContextDependentObjects(); }
-
-  } else {
-    QList<WbNode *> sbn = subNodes(false);
-    foreach (WbNode *node, sbn)
-      static_cast<WbBaseNode *>(node)->updateContextDependentObjects();
-  }
-}
-
 // Utility functions
 bool WbBaseNode::isInBoundingObject() const {
   if (mBoundingObjectFirstTimeSearch) {
@@ -179,6 +179,16 @@ WbNode::NodeUse WbBaseNode::nodeUse() const {
   }
 
   return mNodeUse;
+}
+
+WbPose *WbBaseNode::upperPose() const {
+  if (mUpperPoseFirstTimeSearch) {
+    mUpperPose = WbNodeUtilities::findUpperPose(this);
+    if (areWrenObjectsInitialized())
+      mUpperPoseFirstTimeSearch = false;
+  }
+
+  return mUpperPose;
 }
 
 WbTransform *WbBaseNode::upperTransform() const {
@@ -211,29 +221,30 @@ WbSolid *WbBaseNode::topSolid() const {
   return mTopSolid;
 }
 
-WbBaseNode *WbBaseNode::getSingleFinalizedProtoInstance() {
-  if (!isProtoParameterNode())
-    return NULL;
-
-  WbBaseNode *finalizedInstance = NULL;
-  QVector<WbNode *> nodeInstances = protoParameterNodeInstances();
-  foreach (WbNode *node, nodeInstances) {
-    WbBaseNode *baseNode = dynamic_cast<WbBaseNode *>(node);
-    if (baseNode && baseNode->isPostFinalizedCalled()) {
-      // cppcheck-suppress knownConditionTrueFalse
-      if (finalizedInstance)
-        // multiple finilized instances found
+WbBaseNode *WbBaseNode::getFirstFinalizedProtoInstance() const {
+  QList<const WbNode *> nodes;  // stack containing other instances of the proto parameter node
+                                // to be used in case of deeply nested PROTOs where the first one could not be finalized
+  const WbBaseNode *baseNode = this;
+  while (baseNode && !baseNode->isPostFinalizedCalled() && baseNode->isProtoParameterNode()) {
+    // if node is a proto parameter node we need to find the corresponding proto parameter node instance
+    // if the parameter is used multiple times all the instances are inspected in depth-first search (using the "nodes" list)
+    const QVector<WbNode *> nodeInstances = baseNode->protoParameterNodeInstances();
+    if (nodeInstances.isEmpty()) {
+      if (nodes.isEmpty())
         return NULL;
-
-      finalizedInstance = baseNode;
+      baseNode = static_cast<const WbBaseNode *>(nodes.takeFirst());
+      continue;
     }
+    baseNode = static_cast<const WbBaseNode *>(nodeInstances.at(0));
+    for (int i = 0; i < nodeInstances.size(); ++i)
+      nodes.append(nodeInstances.at(i));
   }
 
-  return finalizedInstance;
+  return baseNode && baseNode->isPostFinalizedCalled() ? const_cast<WbBaseNode *>(baseNode) : NULL;
 }
 
 bool WbBaseNode::isInvisibleNode() const {
-  return WbWorld::instance()->viewpoint()->getInvisibleNodes().contains(const_cast<WbBaseNode *>(this));
+  return WbWorld::instance()->viewpoint()->getInvisibleNodes().contains(this);
 }
 
 QString WbBaseNode::documentationUrl() const {
@@ -243,7 +254,7 @@ QString WbBaseNode::documentationUrl() const {
   return QString();
 }
 
-bool WbBaseNode::exportNodeHeader(WbVrmlWriter &writer) const {
+bool WbBaseNode::exportNodeHeader(WbWriter &writer) const {
   if (!writer.isX3d())
     return WbNode::exportNodeHeader(writer);
 
@@ -257,12 +268,11 @@ bool WbBaseNode::exportNodeHeader(WbVrmlWriter &writer) const {
 
   if (isUseNode() && defNode()) {  // export referred DEF node id
     const WbNode *def = defNode();
-    while (def && def->isProtoParameterNode()) {
-      const QVector<WbNode *> nodeInstances = def->protoParameterNodeInstances();
-      def = nodeInstances.isEmpty() ? NULL : nodeInstances.at(0);
-    }
+    // cppcheck-suppress knownConditionTrueFalse
+    if (def && def->isProtoParameterNode())
+      def = static_cast<const WbBaseNode *>(def)->getFirstFinalizedProtoInstance();
     assert(def != NULL);
-    writer << " USE=\'n" + QString::number(def->uniqueId()) + "\'></" + x3dName() + ">";
+    writer << " USE=\'n" + QString::number(def->uniqueId()) + "\'/>";
     return true;
   }
   return false;
@@ -274,38 +284,40 @@ bool WbBaseNode::isUrdfRootLink() const {
   return false;
 }
 
-void WbBaseNode::exportURDFJoint(WbVrmlWriter &writer) const {
-  if (!dynamic_cast<WbBasicJoint *>(parentNode())) {
-    WbVector3 translation;
-    WbVector3 rotationEuler;
-    const WbNode *const upperLinkRoot = findUrdfLinkRoot();
+void WbBaseNode::exportUrdfJoint(WbWriter &writer) const {
+  if (!parentNode() || dynamic_cast<WbBasicJoint *>(parentNode()))
+    return;
 
-    if (dynamic_cast<const WbTransform *>(this) && dynamic_cast<const WbTransform *>(upperLinkRoot)) {
-      const WbTransform *const upperLinkRootTransform = static_cast<const WbTransform *>(this);
-      translation = upperLinkRootTransform->translationFrom(upperLinkRoot);
-      rotationEuler = upperLinkRootTransform->rotationMatrixFrom(upperLinkRoot).toEulerAnglesZYX();
-    }
+  WbVector3 translation;
+  WbVector3 eulerRotation;
+  const WbNode *const upperLinkRoot = findUrdfLinkRoot();
+  assert(upperLinkRoot);
 
-    translation += writer.jointOffset();
-    writer.setJointOffset(WbVector3(0.0, 0.0, 0.0));
-
-    writer.increaseIndent();
-    writer.indent();
-    writer << QString("<joint name=\"%1_%2_joint\" type=\"fixed\">\n").arg(upperLinkRoot->urdfName()).arg(urdfName());
-
-    writer.increaseIndent();
-    writer.indent();
-    writer << QString("<parent link=\"%1\"/>\n").arg(upperLinkRoot->urdfName());
-    writer.indent();
-    writer << QString("<child link=\"%1\"/>\n").arg(urdfName());
-    writer.indent();
-    writer << QString("<origin xyz=\"%1\" rpy=\"%2\"/>\n")
-                .arg(translation.toString(WbPrecision::FLOAT_MAX))
-                .arg(rotationEuler.toString(WbPrecision::FLOAT_MAX));
-    writer.decreaseIndent();
-
-    writer.indent();
-    writer << "</joint>\n";
-    writer.decreaseIndent();
+  if (dynamic_cast<const WbPose *>(this) && dynamic_cast<const WbPose *>(upperLinkRoot)) {
+    const WbPose *const upperLinkRootPose = static_cast<const WbPose *>(this);
+    translation = upperLinkRootPose->translationFrom(upperLinkRoot);
+    eulerRotation = urdfRotation(upperLinkRootPose->rotationMatrixFrom(upperLinkRoot));
   }
+
+  translation += writer.jointOffset();
+  writer.setJointOffset(WbVector3(0.0, 0.0, 0.0));
+
+  writer.increaseIndent();
+  writer.indent();
+  writer << QString("<joint name=\"%1_%2_joint\" type=\"fixed\">\n").arg(upperLinkRoot->urdfName()).arg(urdfName());
+
+  writer.increaseIndent();
+  writer.indent();
+  writer << QString("<parent link=\"%1\"/>\n").arg(upperLinkRoot->urdfName());
+  writer.indent();
+  writer << QString("<child link=\"%1\"/>\n").arg(urdfName());
+  writer.indent();
+  writer << QString("<origin xyz=\"%1\" rpy=\"%2\"/>\n")
+              .arg(translation.toString(WbPrecision::FLOAT_ROUND_6))
+              .arg(eulerRotation.toString(WbPrecision::FLOAT_ROUND_6));
+  writer.decreaseIndent();
+
+  writer.indent();
+  writer << "</joint>\n";
+  writer.decreaseIndent();
 }

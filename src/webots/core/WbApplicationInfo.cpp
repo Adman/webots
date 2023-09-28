@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,7 +14,11 @@
 
 #include "WbApplicationInfo.hpp"
 #include "WbLog.hpp"
+#include "WbStandardPaths.hpp"
 #include "WbVersion.hpp"
+
+#include <QtCore/QFile>
+#include <QtCore/QTextStream>
 
 #include <stdio.h>
 #include <time.h>
@@ -24,13 +28,59 @@ const WbVersion &WbApplicationInfo::version() {
   static bool firstCall = true;
 
   if (firstCall) {
-    static QString webotsVersionString = "R2021b";  // updated by script
+    static QString webotsVersionString = "R2023b revision 1";  // updated by script
     bool success = webotsVersion.fromString(webotsVersionString);
     if (!success)
       WbLog::fatal(QObject::tr("Internal error: the Webots version is not computable."));
     firstCall = false;
   }
   return webotsVersion;
+}
+
+const QString &WbApplicationInfo::branch() {
+  static QString branchName;
+  static bool firstCall = true;
+  if (firstCall) {
+    branchName = getInfoFromFile("resources/branch.txt");
+    firstCall = false;
+  }
+  return branchName;
+}
+
+const QString &WbApplicationInfo::repo() {
+  static QString repoName;
+  static bool firstCall = true;
+  if (firstCall) {
+    repoName = getInfoFromFile("resources/repo.txt");
+    firstCall = false;
+  }
+  return repoName;
+}
+
+const QString &WbApplicationInfo::commit() {
+  static QString commit;
+  static bool firstCall = true;
+  if (firstCall) {
+    // included only in locally created distributions and nightlies, official distributions don't
+    commit = getInfoFromFile("resources/commit.txt");
+    firstCall = false;
+  }
+  return commit;
+}
+
+const QString WbApplicationInfo::getInfoFromFile(const QString &name) {
+  QString result;
+  QFile file(WbStandardPaths::webotsHomePath() + name);
+  if (file.open(QIODevice::ReadOnly)) {
+    QTextStream in(&file);
+    const QString line = in.readLine();
+    if (!line.isNull())
+      result = line;
+
+    file.close();
+  }
+
+  return result;
 }
 
 unsigned int WbApplicationInfo::releaseDate() {

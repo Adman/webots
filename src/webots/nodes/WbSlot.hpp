@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -34,12 +34,13 @@ public:
 
   // reimplemented public functions
   int nodeType() const override { return WB_NODE_SLOT; }
+  void downloadAssets() override;
   void preFinalize() override;
   void postFinalize() override;
   void createOdeObjects() override;
   void createWrenObjects() override;
   void validateProtoNode() override;
-  void write(WbVrmlWriter &writer) const override;
+  void write(WbWriter &writer) const override;
   void updateCollisionMaterial(bool triggerChange = false, bool onSelection = false) override;
   void setSleepMaterial() override;
   void setScaleNeedUpdate() override;
@@ -47,9 +48,11 @@ public:
   void detachResizeManipulator() const override;
   void reset(const QString &id) override;
   void save(const QString &id) override;
+  QList<const WbBaseNode *> findClosestDescendantNodesWithDedicatedWrenNode() const override;
+  void updateSegmentationColor(const WbRgb &color) override;
 
   // field accessors
-  bool hasEndpoint() const { return mEndPoint->value() != NULL; }
+  bool hasEndPoint() const { return mEndPoint->value() != NULL; }
   WbSFNode *endPointField() const { return mEndPoint; }
   WbNode *endPoint() const { return mEndPoint->value(); }
   WbSolid *solidEndPoint() const;
@@ -68,6 +71,8 @@ public:
 
   // lazy matrix multiplication system
   void setMatrixNeedUpdate() override;
+
+  QString endPointName() const override;
 
 signals:
   void endPointInserted(WbBaseNode *);  // called when a node is inserted in the endPoint

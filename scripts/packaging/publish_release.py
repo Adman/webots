@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 
-# Copyright 1996-2021 Cyberbotics Ltd.
+# Copyright 1996-2023 Cyberbotics Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#     https://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,8 +21,11 @@ import optparse
 import os
 import re
 import requests
+import urllib3
 import sys
+import time
 from github import Github
+from github import GithubException
 from github.GithubException import UnknownObjectException
 
 optParser = optparse.OptionParser(
@@ -34,7 +37,10 @@ optParser.add_option("--branch", dest="branch", default="", help="specifies the 
 optParser.add_option("--commit", dest="commit", default="", help="specifies the commit from which is uploaded the release.")
 options, args = optParser.parse_args()
 
-g = Github(options.key)
+# status codes returned on random github server errors
+status_forcelist = (500, 502, 504)
+retry = urllib3.Retry(total=10, status_forcelist=status_forcelist)
+g = Github(options.key, retry=retry)
 repo = g.get_repo(options.repo)
 releaseExists = False
 now = datetime.datetime.now()
@@ -87,23 +93,47 @@ for release in repo.get_releases():
 if not releaseExists:
     print('Creating release "%s" with tag "%s" on commit "%s"' % (title, tagName, options.commit))
     draft = False if tagName.startswith('nightly_') else True
-    repo.create_git_tag_and_release(tag=tagName,
-                                    tag_message=title,
-                                    release_name=title,
-                                    release_message=message,
-                                    object=options.commit,
-                                    type='commit',
-                                    draft=draft,
-                                    prerelease=True)
+    tagExists = False
+    for tag in repo.get_tags():
+        if tag.name == tagName:
+            tagExists = True
+            break
 
+    if tagExists:
+        print('Tag "%s" already exists.' % (tagName))
+        try:
+            repo.create_git_release(tag=tagName,
+                                    name=title,
+                                    message=message,
+                                    draft=draft,
+                                    prerelease=True,
+                                    target_commitish=options.commit)
+        except GithubException as e:
+            print('Creation of release failed: ', e.data)
+    else:
+        try:
+            repo.create_git_tag_and_release(tag=tagName,
+                                            tag_message=title,
+                                            release_name=title,
+                                            release_message=message,
+                                            object=options.commit,
+                                            type='commit',
+                                            draft=draft,
+                                            prerelease=True)
+        except GithubException as e:
+            print('Creation of tag and release failed: ', e.data)
+
+time.sleep(60)  # allow some delay between creating the tag and requesting the existing ones
+releaseFound = False
 for release in repo.get_releases():
     if release.title == title:
+        releaseFound = True
         assets = {}
         for asset in release.get_assets():
             assets[asset.name] = asset
         releaseCommentModified = False
         if 'WEBOTS_HOME' in os.environ:
-            rootPath = os.environ['WEBOTS_HOME']
+            rootPath = os.path.normpath(os.environ['WEBOTS_HOME'])
         else:
             rootPath = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         for file in os.listdir(os.path.join(rootPath, 'distribution')):
@@ -113,14 +143,24 @@ for release in repo.get_releases():
                     print('Asset "%s" already present in release "%s".' % (file, title))
                 else:
                     print('Uploading "%s"' % file)
-                    remainingTrials = 5
-                    while remainingTrials > 0:
+                    retryCount = 0
+                    while retryCount < 5:
+                        if retryCount > 0:
+                            time.sleep(retryCount * 60)  # wait some minutes before retry
                         try:
                             release.upload_asset(path)
-                            remainingTrials = 0
+                            break
                         except requests.exceptions.ConnectionError:
-                            remainingTrials -= 1
-                            print('Release upload failed (remaining trials: %d)' % remainingTrials)
+                            print('Release upload failed due to connection error (remaining trials: %d)' % (4 - retryCount))
+                        except requests.exceptions.HTTPError:
+                            print('Release upload failed due to server error (remaining trials: %d)' % (4 - retryCount))
+                        except GithubException as e:
+                            print('Release upload failed due to GitHub error (remaining trials: %d)' % (4 - retryCount))
+                            print('Error message', e)
+                        except Exception as e:
+                            print('Release upload failed due to unexpected error (remaining trials: %d)' % (4 - retryCount))
+                            print('Error message', e)
+                        retryCount += 1
                     if (releaseExists and tagName.startswith('nightly_') and not releaseCommentModified and
                             branchName not in release.body):
                         print('Updating release description')
@@ -131,4 +171,8 @@ for release in repo.get_releases():
                         release.update_release(release.title, message, release.draft, release.prerelease, release.tag_name,
                                                release.target_commitish)
         break
-print('Upload finished.')
+
+if not releaseFound:  # if it does not exist, it should have been created by the script itself
+    print('Error, release "%s" should exist by now but does not.' % title)
+else:
+    print('Upload finished.')

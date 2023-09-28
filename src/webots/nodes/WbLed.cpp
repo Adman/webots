@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -97,8 +97,10 @@ void WbLed::updateChildren() {
 
 void WbLed::findMaterialsAndLights(const WbGroup *group) {
   int size = group->children().size();
-  if (size < 1)
+  if (size < 1) {
+    clearMaterialsAndLights();
     return;
+  }
 
   if (group == this) {
     clearMaterialsAndLights();
@@ -107,8 +109,8 @@ void WbLed::findMaterialsAndLights(const WbGroup *group) {
 
   for (int i = 0; i < size; ++i) {
     WbBaseNode *const n = group->child(i);
-    WbLight *light = dynamic_cast<WbLight *>(n);
-    WbGroup *group = dynamic_cast<WbGroup *>(n);
+    WbLight *lightChild = dynamic_cast<WbLight *>(n);
+    WbGroup *groupChild = dynamic_cast<WbGroup *>(n);
 
     if (n->nodeType() == WB_NODE_SHAPE) {
       WbAppearance *appearance = dynamic_cast<WbShape *>(n)->appearance();
@@ -128,11 +130,11 @@ void WbLed::findMaterialsAndLights(const WbGroup *group) {
           connect(pbrAppearance->parentNode(), &WbShape::fieldChanged, this, &WbLed::updateIfNeeded, Qt::UniqueConnection);
         }
       }
-    } else if (light)
-      mLights.append(light);
-    else if (group) {
-      findMaterialsAndLights(group);
-      connect(group, &WbGroup::childrenChanged, this, &WbLed::updateChildren, Qt::UniqueConnection);
+    } else if (lightChild)
+      mLights.append(lightChild);
+    else if (groupChild) {
+      findMaterialsAndLights(groupChild);
+      connect(groupChild, &WbGroup::childrenChanged, this, &WbLed::updateChildren, Qt::UniqueConnection);
     }
   }
 
@@ -208,18 +210,21 @@ void WbLed::setMaterialsAndLightsColor() {
     }
   }
 
+  assert(r >= 0 && r <= 1 && g >= 0 && g <= 1 && b >= 0 && b <= 1);
+  WbRgb lightColor(r, g, b);
+
   // update every material
   foreach (WbMaterial *material, mMaterials)
-    material->setEmissiveColor(WbRgb(r, g, b));
+    material->setEmissiveColor(lightColor);
 
   // same for PbrAppearances
   foreach (WbPbrAppearance *pbrAppearance, mPbrAppearances)
-    pbrAppearance->setEmissiveColor(WbRgb(r, g, b));
+    pbrAppearance->setEmissiveColor(lightColor);
 
   // update every lights
-  bool on = mValue != 0;
+  const bool on = mValue != 0;
   foreach (WbLight *light, mLights) {
-    light->setColor(WbRgb(r, g, b));
+    light->setColor(lightColor);
     // disable WREN lights if not on
     light->toggleOn(on);
   }

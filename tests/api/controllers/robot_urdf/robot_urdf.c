@@ -28,7 +28,7 @@ int compare_files(FILE *file_1, FILE *file_2) {
 }
 
 int main(int argc, char **argv) {
-  char reference_filename[64], generated_filename[64], test[256], command[128];
+  char reference_filename[64], generated_filename[64], test[256];
   snprintf(generated_filename, 64, "%s.urdf", argv[1]);
   snprintf(reference_filename, 64, "%s_reference.urdf", argv[1]);
   snprintf(test, 256, "%s_%s", argv[0], argv[1]);
@@ -41,12 +41,25 @@ int main(int argc, char **argv) {
   fprintf(f_urdf, "%s", urdf);
   fclose(f_urdf);
 #ifndef _WIN32  // check_urdf is not available on Windows
+  char command[128];
   // Save output of `check_urdf` to file
   snprintf(command, 128, "check_urdf %s > result.txt 2> /dev/null", generated_filename);
   const int urdf_check_status = system(command);
+  if (system("sync result.txt") != 0)
+    ts_send_error_and_exit("Failed to sync result.txt");
   FILE *f_res = fopen("result.txt", "r");
-  fseek(f_res, 0L, SEEK_END);
-  const int file_size = ftell(f_res);
+  if (!f_res)
+    ts_send_error_and_exit("Cannot open result.txt file");
+  int file_size;
+  int counter = 0;
+  while (1) {
+    counter++;
+    fseek(f_res, 0L, SEEK_END);
+    file_size = ftell(f_res);
+    if (file_size || counter++ > 50)  // 5 seconds
+      break;
+    usleep(100000);  // sleep for 100 ms
+  };
   ts_assert_int_not_equal(file_size, 0, "check_urdf command is missing");
   if ((urdf_check_status >> 8) != 127 && file_size > 0) {
     // `check_urdf` command is available
@@ -58,7 +71,13 @@ int main(int argc, char **argv) {
     while (fgets(result_string, MAX_LINE_LENGTH, f_res))
       if (strstr(result_string, "Successfully Parsed XML"))
         success_word_found = true;
-    ts_assert_boolean_equal(success_word_found, "URDF verification failed");
+    if (!success_word_found) {
+      rewind(f_res);
+      char *buffer = malloc(file_size + 1);
+      int n = fread(buffer, 1, file_size, f_res);
+      buffer[n] = '\0';
+      ts_send_error_and_exit("URDF verification failed: %s", buffer);
+    }
   }
 #endif
 
@@ -66,7 +85,18 @@ int main(int argc, char **argv) {
   f_urdf = fopen(generated_filename, "r");
   FILE *f_urdf_ref = fopen(reference_filename, "r");
   int line = compare_files(f_urdf_ref, f_urdf);
-  ts_assert_int_equal(line, 0, "Reference file and exported file differ at line %d", line);
+
+  // If the files are different then print the generated file
+  if (line != 0) {
+    int unused __attribute__((unused));
+    char *file_contents;
+    fseek(f_urdf, 0, SEEK_END);
+    const long input_file_size = ftell(f_urdf);
+    rewind(f_urdf);
+    file_contents = malloc(input_file_size * (sizeof(char)));
+    unused = fread(file_contents, sizeof(char), input_file_size, f_urdf);
+    ts_send_error_and_exit("Reference file and exported file differ at line %d: %s", line, file_contents);
+  }
   fclose(f_urdf);
   fclose(f_urdf_ref);
 

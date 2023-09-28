@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -59,18 +59,23 @@ namespace highlevel {
     registerInterface(&mVelocityJointInteraface);
   }
 
-  void WebotsHW::read() {
+  void WebotsHW::read(const ros::Duration &duration) {
     for (ControlledMotor &controlledMotor : mControlledMotors) {
-      controlledMotor.position = controlledMotor.motor->getPositionSensor()->getValue();
-      controlledMotor.velocity = controlledMotor.motor->getVelocity();
+      if (controlledMotor.motor->getPositionSensor()) {
+        const double previousPosition = controlledMotor.position;
+        const double newPosition = controlledMotor.motor->getPositionSensor()->getValue();
+
+        controlledMotor.position = newPosition;
+        controlledMotor.velocity = (newPosition - previousPosition) / duration.toSec();
+      }
     }
   }
 
   void WebotsHW::write() {
     for (ControlledMotor &controlledMotor : mControlledMotors) {
-      if (!isnan(controlledMotor.commandVelocity))
+      if (!std::isnan(controlledMotor.commandVelocity))
         controlledMotor.motor->setVelocity(controlledMotor.commandVelocity);
-      if (!isnan(controlledMotor.commandPosition))
+      if (!std::isnan(controlledMotor.commandPosition))
         controlledMotor.motor->setPosition(controlledMotor.commandPosition);
     }
   }

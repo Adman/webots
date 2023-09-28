@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -33,6 +33,7 @@
 #include "WbMatrix4.hpp"
 #include "WbMatter.hpp"
 #include "WbMotor.hpp"
+#include "WbNodeOperations.hpp"
 #include "WbNodeUtilities.hpp"
 #include "WbOdeContact.hpp"
 #include "WbOdeContext.hpp"
@@ -53,6 +54,7 @@
 #include "WbTokenizer.hpp"
 #include "WbVector4.hpp"
 #include "WbViewpoint.hpp"
+#include "WbVrmlNodeUtilities.hpp"
 #include "WbWorld.hpp"
 #include "WbWorldInfo.hpp"
 #include "WbWrenRenderingContext.hpp"
@@ -77,6 +79,7 @@ using namespace WbSolidUtilities;
 using namespace std;
 
 const double WbSolid::MASS_ZERO_THRESHOLD = 1e-10;
+const double REFERENCE_DENSITY = 1000.0;
 
 QList<const WbSolid *> WbSolid::cSolids;
 
@@ -92,7 +95,6 @@ void WbSolid::init() {
   mGlobalVolume = 0.0;
   mGlobalCenterOfMass = WbVector3();
   mCenterOfMass = WbVector3();
-  mScaledCenterOfMass = WbVector3();
 
   // Flags
   mWasSleeping = false;
@@ -104,18 +106,14 @@ void WbSolid::init() {
   mIsPermanentlyKinematic = false;
   mIsKinematic = false;
   mUpdatedInStep = false;
+  mResetPhysicsInStep = false;
   mKinematicWarningPrinted = false;
   mHasDynamicSolidDescendant = false;
+  mNameClashResolved = false;
 
   // Merger
   mSolidMerger = NULL;
   mMergerIsSet = false;
-
-  // store position
-  // Note: this cannot be put into the preFinalize function because
-  //       of the copy constructor last initialization
-  mSavedTranslations[stateId()] = translation();
-  mSavedRotations[stateId()] = rotation();
 
   // Support polygon representation
   mY = numeric_limits<double>::max();
@@ -239,6 +237,12 @@ WbSolid::~WbSolid() {
     disconnect(solid, &WbSolid::destroyed, this, 0);
 }
 
+void WbSolid::deleteAllSolids() {
+  foreach (WbSolid *const solid, mSolidChildren)
+    WbNodeOperations::instance()->deleteNode(solid);
+  mSolidChildren.clear();
+}
+
 void WbSolid::validateProtoNode() {
   if (isProtoInstance()) {
     bool checkTranslation = !isTranslationFieldVisible();
@@ -261,6 +265,12 @@ void WbSolid::validateProtoNode() {
         break;
     }
   }
+}
+
+void WbSolid::downloadAssets() {
+  WbGroup::downloadAssets();
+  if (boundingObject())
+    boundingObject()->downloadAssets();
 }
 
 void WbSolid::preFinalize() {
@@ -324,10 +334,9 @@ void WbSolid::preFinalize() {
     }
   }
 
-  checkScaleAtLoad(true);
-  if (nodeType() != WB_NODE_TOUCH_SENSOR && mBoundingObject->value() && mPhysics->value() == NULL &&
-      mJointParents.size() == 0 && upperSolid() && upperSolid()->physics())
-    parsingWarn(tr("As 'physics' is set to NULL, collisions will have no effect"));
+  if (nodeType() != WB_NODE_TOUCH_SENSOR && nodeType() != WB_NODE_VACUUM_GRIPPER && mBoundingObject->value() &&
+      mPhysics->value() == NULL && mJointParents.size() == 0 && upperSolid() && upperSolid()->physics())
+    parsingWarn(tr("As 'physics' is set to NULL, collisions will have no effect."));
 }
 
 bool WbSolid::restoreHiddenKinematicParameters(const HiddenKinematicParametersMap &map, int &counter) {
@@ -370,14 +379,14 @@ bool WbSolid::applyHiddenKinematicParameters(const HiddenKinematicParameters *hk
   if (t) {
     if (backupPrevious)
       previousT = new WbVector3(translation());
-    WbTransform::setTranslation(*t);
+    WbPose::setTranslation(*t);
   }
 
   const WbRotation *const r = hkp->rotation();
   if (r) {
     if (backupPrevious)
       previousR = new WbRotation(rotation());
-    WbTransform::setRotation(*r);
+    WbPose::setRotation(*r);
   }
 
   const PositionMap *const m = hkp->positions();
@@ -391,28 +400,29 @@ bool WbSolid::applyHiddenKinematicParameters(const HiddenKinematicParameters *hk
       if (!p)
         return false;
       const int jointIndex = i.key();
-      WbJoint *const joint = dynamic_cast<WbJoint *>(mJointChildren.at(jointIndex));
-      if (!joint)
+      assert(jointIndex < mJointChildren.length());
+      WbJoint *const j = dynamic_cast<WbJoint *>(mJointChildren.at(jointIndex));
+      if (!j)
         return false;
 
       if (backupPrevious) {
         WbVector3 v(NAN, NAN, NAN);
-        const WbJointParameters *const param1 = joint->parameters();
+        const WbJointParameters *const param1 = j->parameters();
         if (param1)
-          v[0] = joint->position();
-        const WbJointParameters *const param2 = joint->parameters2();
+          v[0] = j->position();
+        const WbJointParameters *const param2 = j->parameters2();
         if (param2)
-          v[1] = joint->position(2);
-        const WbJointParameters *const param3 = joint->parameters3();
+          v[1] = j->position(2);
+        const WbJointParameters *const param3 = j->parameters3();
         if (param3)
-          v[2] = joint->position(3);
+          v[2] = j->position(3);
         previousP->insert(jointIndex, new WbVector3(v));
       }
 
-      for (int j = 0; j < 2; ++j) {
-        const double posj = (*p)[j];
-        if (!std::isnan(posj))
-          joint->setPosition(posj, j + 1);
+      for (int k = 0; k < 3; ++k) {
+        const double posk = (*p)[k];
+        if (!std::isnan(posk))
+          j->setPosition(posk, k + 1);
       }
     }
   }
@@ -465,6 +475,7 @@ void WbSolid::postFinalize() {
   connect(this, &WbSolid::massPropertiesChanged, this, &WbSolid::displayWarning);
   connect(mPhysics, &WbSFNode::changed, this, &WbSolid::updatePhysics);
   connect(mRadarCrossSection, &WbSFDouble::changed, this, &WbSolid::updateRadarCrossSection);
+  connect(mRecognitionColors, &WbMFColor::itemChanged, this, &WbSolid::updateRecognitionColors);
   connect(mRecognitionColors, &WbMFColor::itemRemoved, this, &WbSolid::updateRecognitionColors);
   connect(mRecognitionColors, &WbMFColor::itemInserted, this, &WbSolid::updateRecognitionColors);
 
@@ -489,8 +500,8 @@ void WbSolid::postFinalize() {
   }
 }
 
-void WbSolid::resolveNameClashIfNeeded(bool automaticallyChange, bool recursive, const QList<WbSolid *> siblings,
-                                       QSet<const QString> *topSolidNameSet) const {
+void WbSolid::resolveNameClashIfNeeded(bool automaticallyChange, bool recursive, const QList<WbSolid *> &siblings,
+                                       QSet<const QString> *topSolidNameSet) {
   const QString &warningText =
     tr("'name' field value should be unique: '%1' already used by a sibling Solid node.").arg(name());
 
@@ -515,6 +526,7 @@ void WbSolid::resolveNameClashIfNeeded(bool automaticallyChange, bool recursive,
     const WbNode *parameterNode = protoParameterNode();
     while (parameterNode && parameterNode->protoParameterNode())
       parameterNode = parameterNode->protoParameterNode();
+    const WbNode *visibleNode = parameterNode ? parameterNode : this;
 
     bool found = false;
     re.setPattern(QString("%1\\((\\d+)\\)").arg(QRegularExpression::escape(nameWithoutIndex)));
@@ -532,7 +544,7 @@ void WbSolid::resolveNameClashIfNeeded(bool automaticallyChange, bool recursive,
           while (otherParameterNode && otherParameterNode->protoParameterNode())
             otherParameterNode = otherParameterNode->protoParameterNode();
           if (otherParameterNode == parameterNode) {
-            parsingWarn(
+            visibleNode->parsingWarn(
               warningText +
               tr(" A unique name cannot be automatically generated because the same PROTO parameter is used multiple times."));
             goto recursion;
@@ -548,14 +560,17 @@ void WbSolid::resolveNameClashIfNeeded(bool automaticallyChange, bool recursive,
     if (found) {
       if (automaticallyChange) {
         WbField *nameField = findField("name", true);
-        while (nameField->parameter())
+        bool isTemplateRegenerator = false;
+        while (nameField && !isTemplateRegenerator) {
+          isTemplateRegenerator = WbNodeUtilities::isTemplateRegeneratorField(nameField);
           nameField = nameField->parameter();
-        bool isTemplateRegenerator = nameField->isTemplateRegenerator();
+        }
         if (isTemplateRegenerator)
-          parsingWarn(warningText +
-                      tr(" A unique name cannot be automatically generated because 'name' is a template regenerator field."));
-        else if (!WbNodeUtilities::isVisible(findField("name")))
-          parsingWarn(warningText);
+          visibleNode->parsingWarn(
+            warningText +
+            tr(" A unique name cannot be automatically generated because 'name' is a template regenerator field."));
+        else if (!WbVrmlNodeUtilities::isVisible(findField("name")))
+          visibleNode->parsingWarn(warningText);
         else {
           // find first available index
           std::sort(indices.begin(), indices.end());
@@ -565,11 +580,12 @@ void WbSolid::resolveNameClashIfNeeded(bool automaticallyChange, bool recursive,
               break;
             newIndex++;
           }
-          QString newName = QString("%1(%2)").arg(nameWithoutIndex).arg(newIndex);
+          const QString newName = QString("%1(%2)").arg(nameWithoutIndex).arg(newIndex);
+          mNameClashResolved = true;
           mName->setValue(newName);
         }
       } else
-        parsingWarn(warningText);
+        visibleNode->parsingWarn(warningText);
     }
   }
 
@@ -582,8 +598,12 @@ recursion:
 }
 
 void WbSolid::updateName() {
-  const WbSolid *us = upperSolid();
-  resolveNameClashIfNeeded(false, false, us ? us->solidChildren().toList() : WbWorld::instance()->topSolids(), NULL);
+  if (!mNameClashResolved) {
+    const WbSolid *us = upperSolid();
+    resolveNameClashIfNeeded(false, false, us ? us->solidChildren().toList() : WbWorld::instance()->topSolids(), NULL);
+  } else
+    // name field has just been updated in a previous call of resolveNameClashIfNeeded
+    mNameClashResolved = false;
   WbMatter::updateName();
 }
 
@@ -675,7 +695,7 @@ void WbSolid::createWrenObjects() {
   wr_renderable_set_receive_shadows(mCenterOfMassRenderable, false);
   wr_renderable_set_material(mCenterOfMassRenderable, mCenterOfMassMaterial, NULL);
   wr_renderable_set_mesh(mCenterOfMassRenderable, WR_MESH(mCenterOfMassMesh));
-  wr_renderable_set_visibility_flags(mCenterOfMassRenderable, WbWrenRenderingContext::VF_SELECTED_OUTLINE);
+  wr_renderable_set_visibility_flags(mCenterOfMassRenderable, WbWrenRenderingContext::VF_INVISIBLE_FROM_CAMERA);
   wr_renderable_set_drawing_mode(mCenterOfMassRenderable, WR_RENDERABLE_DRAWING_MODE_LINES);
   wr_renderable_set_drawing_order(mCenterOfMassRenderable, WR_RENDERABLE_DRAWING_ORDER_AFTER_1);
 
@@ -701,7 +721,7 @@ void WbSolid::createWrenObjects() {
   wr_renderable_set_receive_shadows(mGlobalCenterOfMassRenderable, false);
   wr_renderable_set_material(mGlobalCenterOfMassRenderable, mGlobalCenterOfMassMaterial, NULL);
   wr_renderable_set_mesh(mGlobalCenterOfMassRenderable, WR_MESH(mGlobalCenterOfMassMesh));
-  wr_renderable_set_visibility_flags(mGlobalCenterOfMassRenderable, WbWrenRenderingContext::VF_SELECTED_OUTLINE);
+  wr_renderable_set_visibility_flags(mGlobalCenterOfMassRenderable, WbWrenRenderingContext::VF_INVISIBLE_FROM_CAMERA);
   wr_renderable_set_drawing_mode(mGlobalCenterOfMassRenderable, WR_RENDERABLE_DRAWING_MODE_LINES);
   wr_renderable_set_drawing_order(mGlobalCenterOfMassRenderable, WR_RENDERABLE_DRAWING_ORDER_AFTER_1);
 
@@ -729,7 +749,7 @@ void WbSolid::createWrenObjects() {
   wr_renderable_set_material(mCenterOfBuoyancyRenderable, mCenterOfBuoyancyMaterial, NULL);
   wr_renderable_set_drawing_order(mCenterOfBuoyancyRenderable, WR_RENDERABLE_DRAWING_ORDER_AFTER_1);
   wr_renderable_set_drawing_mode(mCenterOfBuoyancyRenderable, WR_RENDERABLE_DRAWING_MODE_LINES);
-  wr_renderable_set_visibility_flags(mCenterOfBuoyancyRenderable, WbWrenRenderingContext::VF_SELECTED_OUTLINE);
+  wr_renderable_set_visibility_flags(mCenterOfBuoyancyRenderable, WbWrenRenderingContext::VF_INVISIBLE_FROM_CAMERA);
   mCenterOfBuoyancyTransform = wr_transform_new();
   wr_node_set_visible(WR_NODE(mCenterOfBuoyancyTransform), false);
   wr_transform_attach_child(mCenterOfBuoyancyTransform, WR_NODE(mCenterOfBuoyancyRenderable));
@@ -814,10 +834,10 @@ void WbSolid::setupSolidMergers() {
 
 // Recursive method that sets children joints with referenced endpoints
 void WbSolid::setJointChildrenWithReferencedEndpoint() {
-  foreach (WbBasicJoint *const joint, mJointChildren)
-    if (joint->solidReference()) {
-      joint->updateEndPoint();
-      joint->setJoint();
+  foreach (WbBasicJoint *const j, mJointChildren)
+    if (j->solidReference()) {
+      j->updateEndPoint();
+      j->setJoint();
     }
 
   foreach (WbSolid *const solid, mSolidChildren)
@@ -835,7 +855,7 @@ void WbSolid::createOdeObjects() {
   }
 
   // Recurses through solid descendants
-  WbTransform::createOdeObjects();
+  WbPose::createOdeObjects();
 }
 
 // Sets recursively every ODE object which was not set during solid merger settings, i.e. bodies and joints to parents
@@ -879,9 +899,9 @@ void WbSolid::resetJointsToLinkedSolids() {
   foreach (WbSolid *const solid, mSolidChildren)
     solid->resetJointPositions(true);
 
-  foreach (WbBasicJoint *const joint, mJointChildren)
-    if (joint->solidReference())
-      joint->resetJointPositions();
+  foreach (WbBasicJoint *const j, mJointChildren)
+    if (j->solidReference())
+      j->resetJointPositions();
 }
 
 // Reset ODE joints (with no position offset) for every solid linked to this one or to one of its descendants
@@ -951,9 +971,9 @@ void WbSolid::adjustOdeMass(bool mergeMass) {
 
       // set mass displayed in the Solid's mass tab
       dMassSetParameters(mMassAroundCoM, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0);
-      mMassAroundCoM->c[0] = mScaledCenterOfMass.x();
-      mMassAroundCoM->c[1] = mScaledCenterOfMass.y();
-      mMassAroundCoM->c[2] = mScaledCenterOfMass.z();
+      mMassAroundCoM->c[0] = mCenterOfMass.x();
+      mMassAroundCoM->c[1] = mCenterOfMass.y();
+      mMassAroundCoM->c[2] = mCenterOfMass.z();
       updateTopSolidGlobalMass();
       emit massPropertiesChanged();
     }
@@ -966,16 +986,13 @@ void WbSolid::adjustOdeMass(bool mergeMass) {
     memcpy(mOdeMass, mReferenceMass, sizeof(dMass));
     const WbPhysics *const p = physics();
     const double fieldMass = p->mass();
-    const bool fieldMassIsPositive = fieldMass > 0.0;
-    const double s = absoluteScale().x();
 
-    if (fieldMassIsPositive) {
-      const double s2 = s * s;
-      dMassAdjust(mOdeMass, s * s2 * fieldMass);
-    } else {
-      const double density = p->density();
-      if (density >= 0.0)
-        dMassAdjust(mOdeMass, (currentMass * density) / 1000.0);
+    if (fieldMass > 0.0)
+      dMassAdjust(mOdeMass, fieldMass);
+    else {
+      const double fieldDensity = p->density();
+      if (fieldDensity >= 0.0)
+        dMassAdjust(mOdeMass, (currentMass * fieldDensity) / REFERENCE_DENSITY);
     }
 
     memcpy(mMassAroundCoM, mOdeMass, sizeof(dMass));
@@ -983,7 +1000,7 @@ void WbSolid::adjustOdeMass(bool mergeMass) {
     // Translate the mass to solid's origin
     if (p->centerOfMass().size() == 1) {
       dVector3 t;
-      dSubtractVectors3(t, scaledCenterOfMass().ptr(), mReferenceMass->c);
+      dSubtractVectors3(t, centerOfMass().ptr(), mReferenceMass->c);
       dMassTranslate(mOdeMass, t[0], t[1], t[2]);
     }
   }
@@ -998,7 +1015,7 @@ void WbSolid::adjustOdeMass(bool mergeMass) {
   emit massPropertiesChanged();
 }
 
-void WbSolid::addMassFromInsertedNode(WbBaseNode *node) {  // node is a WbGeometry or a WbTransform
+void WbSolid::addMassFromInsertedNode(WbBaseNode *node) {  // node is a WbGeometry or a WbPose
   assert(isDynamic() && mSolidMerger);
   addMass(node);
   adjustOdeMass();
@@ -1059,11 +1076,11 @@ void WbSolid::removeBoundingGeometry() {
 // This is the default joint creation behavior
 // this method is overridden in the WbTouchSensor class
 dJointID WbSolid::createJoint(dBodyID body, dBodyID parentBody, dWorldID world) const {
-  dJointID joint = dJointCreateFixed(world, 0);
+  dJointID odeJoint = dJointCreateFixed(world, 0);
 
-  setJoint(joint, body, parentBody);
+  setJoint(odeJoint, body, parentBody);
 
-  return joint;
+  return odeJoint;
 }
 
 void WbSolid::setJoint(dJointID joint, dBodyID body, dBodyID parentBody) const {
@@ -1096,7 +1113,7 @@ WbVector3 WbSolid::relativeLinearVelocity(const WbSolid *parentSolid) const {
   } else if (parentSolid != NULL) {  // in case of dynamic solid, the velocity is already absolute
     while (!solid->isTopSolid() && solid != parentSolid)
       solid = solid->upperSolid();
-    l -= solid->solidMerger()->solid()->linearVelocity();
+    l -= solid->isDynamic() ? solid->solidMerger()->solid()->linearVelocity() : solid->linearVelocity();
   }
 
   assert(solid == parentSolid || parentSolid == NULL);
@@ -1119,7 +1136,7 @@ WbVector3 WbSolid::relativeAngularVelocity(const WbSolid *parentSolid) const {
   } else if (parentSolid != NULL) {  // in case of dynamic solid, the velocity is already absolute
     while (!solid->isTopSolid() && solid != parentSolid)
       solid = solid->upperSolid();
-    a -= solid->solidMerger()->solid()->angularVelocity();
+    a -= solid->isDynamic() ? solid->solidMerger()->solid()->angularVelocity() : solid->angularVelocity();
   }
 
   assert(solid == parentSolid || parentSolid == NULL);
@@ -1241,34 +1258,6 @@ void WbSolid::updateRotation() {
     emit positionChangedArtificially();
 }
 
-// Scale
-
-void WbSolid::updateScale(bool warning) {
-  const int constraint = constraintType();
-  if (checkScale(constraint, warning))
-    return;
-
-  WbMatter::applyToScale();
-
-  if (WbOdeContext::instance() && boundingObject())
-    applyToOdeScale();
-
-  if (isDynamic())
-    applyMassCenterToWren();
-}
-
-void WbSolid::setScaleNeedUpdate() {
-  WbMatter::setScaleNeedUpdate();
-
-  foreach (WbBasicJoint *const joint, mJointChildren) {
-    if (joint->solidReference())
-      continue;
-    WbSolid *const s = joint->solidEndPoint();
-    if (s)
-      s->setScaleNeedUpdate();
-  }
-}
-
 // Creates and updates, or destroys, the ODE dBody according to the existence of a WbPhysics node
 void WbSolid::updatePhysics() {
   assert(areOdeObjectsCreated());
@@ -1296,6 +1285,8 @@ void WbSolid::updatePhysics() {
     delete mSolidMerger.data();
   }
 
+  if (mOdeMass && mPhysics->value())
+    dMassSetZero(mOdeMass);  // force recomputing the ODE mass
   setupSolidMergers();
   setBodiesAndJointsToParents();
   setJointChildrenWithReferencedEndpoint();
@@ -1317,11 +1308,25 @@ void WbSolid::updateRadarCrossSection() {
 }
 
 void WbSolid::updateRecognitionColors() {
+  WbRgb segmentationColor(0.0, 0.0, 0.0);
   if (!mRecognitionColors->isEmpty()) {
     if (!WbWorld::instance()->cameraRecognitionObjects().contains(this))
       WbWorld::instance()->addCameraRecognitionObject(this);
+    segmentationColor = mRecognitionColors->item(0);
   } else if (WbWorld::instance()->cameraRecognitionObjects().contains(this))
     WbWorld::instance()->removeCameraRecognitionObject(this);
+
+  // set segmentation color in child nodes
+  WbGroup::updateSegmentationColor(segmentationColor);
+}
+
+void WbSolid::updateSegmentationColor(const WbRgb &color) {
+  // apply segmentation color from parent node if needed
+  if (!mRecognitionColors->isEmpty())
+    // this node already defines different recognitionColors
+    return;
+
+  WbGroup::updateSegmentationColor(color);
 }
 
 void WbSolid::updateOdeMass() {
@@ -1346,21 +1351,14 @@ void WbSolid::setOdeInertiaMatrix() {
   assert(isDynamic() && physics()->mode() == WbPhysics::CUSTOM_INERTIA_MATRIX);
   const WbPhysics *const p = physics();
   mUseInertiaMatrix = true;
-  const WbMFVector3 &inertiaMatrix = p->inertiaMatrix();
-  const WbVector3 &v0 = inertiaMatrix.item(0);
-  const WbVector3 &v1 = inertiaMatrix.item(1);
-  const double s = absoluteScale().x();
-  double s3 = s * s;
-  double s5 = s3;
-  s3 *= s;
-  s5 *= s3;
-  const double mass = p->mass();
-  dMassSetParameters(mOdeMass, s3 * mass, 0.0, 0.0, 0.0, s5 * v0.x(), s5 * v0.y(), s5 * v0.z(), s5 * v1.x(), s5 * v1.y(),
-                     s5 * v1.z());
+  const WbMFVector3 &inertia = p->inertiaMatrix();
+  const WbVector3 &v0 = inertia.item(0);
+  const WbVector3 &v1 = inertia.item(1);
+  dMassSetParameters(mOdeMass, p->mass(), 0.0, 0.0, 0.0, v0.x(), v0.y(), v0.z(), v1.x(), v1.y(), v1.z());
 
   memcpy(mMassAroundCoM, mOdeMass, sizeof(dMass));
   updateCenterOfMass();
-  const WbVector3 &com = scaledCenterOfMass();
+  const WbVector3 &com = centerOfMass();
   dMassTranslate(mOdeMass, com.x(), com.y(), com.z());  // translates inertia matrix to solid frame's origin
   emit massPropertiesChanged();
 }
@@ -1385,7 +1383,7 @@ void WbSolid::setInertiaMatrixFromBoundingObject() {
   dMassSetZero(&dmass);
 
   // Adds the masses of all the primitives lying in the bounding object
-  WbSolidUtilities::addMass(&dmass, boundingObject(), 1000.0);
+  WbSolidUtilities::addMass(&dmass, boundingObject(), REFERENCE_DENSITY);
   memcpy(mReferenceMass, &dmass, sizeof(dMass));
 
   // Computes the inertia matrix around the center of mass of the bounding object
@@ -1395,27 +1393,27 @@ void WbSolid::setInertiaMatrixFromBoundingObject() {
   const WbField *const parameter = findField("physics", true)->parameter();
   WbPhysics *const p = parameter ? static_cast<WbPhysics *>(static_cast<WbSFNode *>(parameter->value())->value()) : physics();
 
-  const double s = 1.0 / absoluteScale().x();
-  double s3 = s * s;
-  double s5 = s3;
-  s3 *= s;
-
-  if (p->mass() < 0.0) {
-    double boundingObjectMass = mReferenceMass->mass;
-    boundingObjectMass *= 0.001 * p->density();
-    p->setMass(boundingObjectMass * s3, true);
+  // Sets the actual total mass to mReferenceMass
+  double boundingObjectMass = mReferenceMass->mass;
+  if (p->mass() > 0.0)
+    boundingObjectMass = p->mass();
+  else {
+    boundingObjectMass *= p->density() / REFERENCE_DENSITY;
+    p->setMass(boundingObjectMass, true);
     p->parsingInfo(tr("'mass' set as bounding object's mass based on 'density'."));
   }
+
+  // Adjust the total according to mass and density fields
+  dMassAdjust(mReferenceMass, boundingObjectMass);
 
   p->setDensity(-1.0, true);
 
   const double *const I = mReferenceMass->I;
-  s5 *= s3;
-  p->setInertiaMatrix(I[0] * s5, I[5] * s5, I[10] * s5, I[1] * s5, I[2] * s5, I[6] * s5, true);
+  p->setInertiaMatrix(I[0], I[5], I[10], I[1], I[2], I[6], true);
   p->checkInertiaMatrix(false);
 
   const double *const c = mReferenceMass->c;
-  p->setCenterOfMass(c[0] * s, c[1] * s, c[2] * s, true);
+  p->setCenterOfMass(c[0], c[1], c[2], true);
   p->parsingInfo(tr("Bounding object's center of mass inserted."));
 
   p->updateMode();
@@ -1484,11 +1482,11 @@ void WbSolid::collectSolidChildren(const WbGroup *group, bool connectSignals, QV
       continue;
     }
 
-    WbBasicJoint *joint = dynamic_cast<WbBasicJoint *>(n);
-    if (joint) {
-      jointChildren.append(joint);
-      WbSolid *const ep = joint->solidEndPoint();
-      if (ep && joint->solidReference() == NULL) {
+    WbBasicJoint *j = dynamic_cast<WbBasicJoint *>(n);
+    if (j) {
+      jointChildren.append(j);
+      WbSolid *const ep = j->solidEndPoint();
+      if (ep && j->solidReference() == NULL) {
         solidChildren.append(ep);
         continue;
       }
@@ -1501,12 +1499,14 @@ void WbSolid::collectSolidChildren(const WbGroup *group, bool connectSignals, QV
     }
 
     const WbGroup *const groupChild = dynamic_cast<WbGroup *>(n);
-    if (groupChild)
+    if (groupChild) {
       collectSolidChildren(groupChild, connectSignals, solidChildren, jointChildren, propellerChildren);
+      continue;
+    }
 
     const WbSlot *slot = dynamic_cast<WbSlot *>(n);
     if (slot) {
-      if (slot->hasEndpoint()) {
+      if (slot->hasEndPoint()) {
         WbSlot *sep = slot->slotEndPoint();
         while (sep) {
           slot = sep;
@@ -1517,11 +1517,11 @@ void WbSolid::collectSolidChildren(const WbGroup *group, bool connectSignals, QV
         else if (slot->groupEndPoint())
           collectSolidChildren(slot->groupEndPoint(), connectSignals, solidChildren, jointChildren, propellerChildren);
         else {
-          joint = dynamic_cast<WbBasicJoint *>(slot->endPoint());
-          if (joint) {
-            jointChildren.append(joint);
-            WbSolid *const ep = joint->solidEndPoint();
-            if (ep && joint->solidReference() == NULL) {
+          j = dynamic_cast<WbBasicJoint *>(slot->endPoint());
+          if (j) {
+            jointChildren.append(j);
+            WbSolid *const ep = j->solidEndPoint();
+            if (ep && j->solidReference() == NULL) {
               solidChildren.append(ep);
               continue;
             }
@@ -1559,6 +1559,11 @@ void WbSolid::updateDynamicSolidDescendantFlag() {
     us->updateDynamicSolidDescendantFlag();
 }
 
+void WbSolid::updateChildrenAfterJointEndPointChange(WbBaseNode *node) {
+  if (node)
+    updateChildren();
+}
+
 void WbSolid::updateChildren() {
   mSolidChildren.clear();
   mJointChildren.clear();
@@ -1570,6 +1575,9 @@ void WbSolid::updateChildren() {
     connect(solid, &WbSolid::destroyed, this, &WbSolid::refreshPhysicsRepresentation, Qt::UniqueConnection);
     connect(solid, &WbSolid::physicsPropertiesChanged, this, &WbSolid::refreshPhysicsRepresentation, Qt::UniqueConnection);
   }
+  foreach (WbBasicJoint *const jointChild, mJointChildren)
+    connect(jointChild, &WbBasicJoint::endPointChanged, this, &WbSolid::updateChildrenAfterJointEndPointChange,
+            Qt::UniqueConnection);
 }
 
 bool WbSolid::resetJointPositions(bool allParents) {
@@ -1577,9 +1585,9 @@ bool WbSolid::resetJointPositions(bool allParents) {
 
   setOdeJointToUpperSolid();
 
-  foreach (WbBasicJoint *const joint, mJointParents) {
-    if (allParents || joint->upperSolid()->belongsToStaticBasis())
-      b |= joint->resetJointPositions();
+  foreach (WbBasicJoint *const j, mJointParents) {
+    if (allParents || j->upperSolid()->belongsToStaticBasis())
+      b |= j->resetJointPositions();
   }
 
   return b;
@@ -1588,8 +1596,6 @@ bool WbSolid::resetJointPositions(bool allParents) {
 void WbSolid::updateGlobalCenterOfMass() {
   mGlobalCenterOfMass.setXyz(0.0, 0.0, 0.0);
   mGlobalMass = 0.0;
-  double mass = mGlobalMass;
-  WbVector3 com(mGlobalCenterOfMass);
   foreach (WbSolid *const solid, mSolidChildren) {
     if (!solid->isPreFinalizedCalled())
       // skip until finalization is completed
@@ -1598,12 +1604,9 @@ void WbSolid::updateGlobalCenterOfMass() {
 
     solid->updateGlobalCenterOfMass();
     const double childGlobalMass = solid->globalMass();
-    mass += childGlobalMass;
-    com += childGlobalMass * solid->globalCenterOfMass();
+    mGlobalMass += childGlobalMass;
+    mGlobalCenterOfMass += childGlobalMass * solid->globalCenterOfMass();
   }
-
-  mGlobalMass = mass;
-  mGlobalCenterOfMass = com;
 
   if (isDynamic()) {
     mGlobalCenterOfMass += mOdeMass->mass * (matrix() * centerOfMass());
@@ -1624,12 +1627,12 @@ void WbSolid::updateCenterOfBuoyancy() {
   mCenterOfBuoyancy.setXyz(0.0, 0.0, 0.0);
   for (int i = 0; i < size; ++i) {
     const dImmersionGeom &ig = mListOfImmersions.at(i);
-    const double volume = ig.volume;
+    const double immersedVolume = ig.volume;
     const double *const cob = ig.buoyancyCenter;
-    const dReal density = dFluidGetDensity(dGeomGetFluid(ig.g2));
-    const dReal mass = density * volume;
-    mCenterOfBuoyancy += mass * WbVector3(cob[0], cob[1], cob[2]);
-    immersedMass += mass;
+    const dReal fluidDensity = dFluidGetDensity(dGeomGetFluid(ig.g2));
+    const dReal fluidMass = fluidDensity * immersedVolume;
+    mCenterOfBuoyancy += fluidMass * WbVector3(cob[0], cob[1], cob[2]);
+    immersedMass += fluidMass;
   }
 
   if (immersedMass > 0.0)
@@ -1641,7 +1644,7 @@ double WbSolid::averageDensity() const {
 }
 
 void WbSolid::updateGlobalVolume() {
-  double volume = 0.0;
+  double cumulativeVolume = 0.0;
 
   foreach (WbSolid *const solid, mSolidChildren) {
     if (!solid->isPreFinalizedCalled())
@@ -1649,10 +1652,10 @@ void WbSolid::updateGlobalVolume() {
       // it could happen in particular in case of multiple instances of PROTO parameter node
       return;
     solid->updateGlobalVolume();
-    volume += solid->globalVolume();
+    cumulativeVolume += solid->globalVolume();
   }
 
-  mGlobalVolume = volume + 0.001 * mReferenceMass->mass;
+  mGlobalVolume = cumulativeVolume + 0.001 * mReferenceMass->mass;
 }
 
 void WbSolid::updateCenterOfMass() {
@@ -1663,25 +1666,16 @@ void WbSolid::updateCenterOfMass() {
   const int mode = p->mode();
 
   mCenterOfMass.setXyz(0.0, 0.0, 0.0);
-  mScaledCenterOfMass.setXyz(0.0, 0.0, 0.0);
 
   switch (mode) {
     case WbPhysics::CUSTOM_INERTIA_MATRIX:
       mCenterOfMass = p->centerOfMass().item(0);
-      mScaledCenterOfMass = mCenterOfMass;
-      mScaledCenterOfMass *= absoluteScale().x();
       break;
     case WbPhysics::BOUNDING_OBJECT_BASED: {
       if (p->centerOfMass().size() == 1) {
         mCenterOfMass = p->centerOfMass().item(0);
-        mScaledCenterOfMass = mCenterOfMass;
-        mScaledCenterOfMass *= absoluteScale().x();
-      } else if (mBoundingObject->value() != NULL) {
-        mScaledCenterOfMass.setXyz(mReferenceMass->c[0], mReferenceMass->c[1], mReferenceMass->c[2]);
-        mCenterOfMass = mScaledCenterOfMass;
-        const double s = 1.0 / absoluteScale().x();
-        mCenterOfMass *= s;
-      }
+      } else if (mBoundingObject->value() != NULL)
+        mCenterOfMass.setXyz(mReferenceMass->c[0], mReferenceMass->c[1], mReferenceMass->c[2]);
       break;
     }
     default:
@@ -1746,9 +1740,9 @@ void WbSolid::applyVisibilityFlagsToWren(bool selected) {
 }
 
 void WbSolid::setDefaultMassSettings(bool applyCenterOfMassTranslation, bool warning) {
-  const double mass = physics()->mass();
-  if (mass > 0.0) {
-    dMassSetParameters(mOdeMass, mass, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0);
+  const double fieldMass = physics()->mass();
+  if (fieldMass > 0.0) {
+    dMassSetParameters(mOdeMass, fieldMass, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0);
     if (warning)
       parsingWarn(
         tr("Undefined inertia matrix: using the identity matrix. Please specify 'boundingObject' or 'inertiaMatrix' values."));
@@ -1760,12 +1754,13 @@ void WbSolid::setDefaultMassSettings(bool applyCenterOfMassTranslation, bool war
           tr("Mass is invalid because 'boundingObject' is not defined. Using default mass properties: mass = 1, inertia "
              "matrix = identity"));
       else
-        parsingWarn(tr("Mass is invalid: %1. Using default mass properties: mass = 1, inertia matrix = identity").arg(mass));
+        parsingWarn(
+          tr("Mass is invalid: %1. Using default mass properties: mass = 1, inertia matrix = identity").arg(fieldMass));
     }
   }
 
   if (applyCenterOfMassTranslation)
-    dMassTranslate(mOdeMass, mScaledCenterOfMass.x(), mScaledCenterOfMass.y(), mScaledCenterOfMass.z());
+    dMassTranslate(mOdeMass, mCenterOfMass.x(), mCenterOfMass.y(), mCenterOfMass.z());
 }
 
 // Compute the mass and the inertia around solid frame's origin
@@ -1781,7 +1776,7 @@ void WbSolid::createOdeMass(bool reset) {
   const WbPhysics *const p = physics();
   const bool customMass = p->mode() == WbPhysics::CUSTOM_INERTIA_MATRIX;
   // needed for average density and average damping
-  WbSolidUtilities::addMass(mReferenceMass, boundingObject(), 1000.0, !customMass);
+  WbSolidUtilities::addMass(mReferenceMass, boundingObject(), REFERENCE_DENSITY, !customMass);
 
   // Checks whether there is a valid inertia matrix, and uses it if so
   if (customMass)
@@ -1801,17 +1796,17 @@ void WbSolid::createOdeMass(bool reset) {
 
     assert(mOdeMass->mass > 0.0);
 
-    const double density = p->density();
-    const double mass = p->mass();
-    const double s = absoluteScale().x();
+    const double fieldDensity = p->density();
+    const double fieldMass = p->mass();
 
     // Sets the actual total mass
-    double actualMass = mOdeMass->mass;
-    if (mass > 0.0) {
-      const double s2 = s * s;
-      actualMass = s * s2 * mass;
-    } else if (density != 1000.0)
-      actualMass *= 0.001 * density;
+    double actualMass;
+    if (fieldMass > 0.0)
+      actualMass = fieldMass;
+    else if (fieldDensity != REFERENCE_DENSITY)
+      actualMass = mOdeMass->mass * fieldDensity / REFERENCE_DENSITY;
+    else
+      actualMass = mOdeMass->mass;
 
     // Adjust the total according to mass and density fields
     dMassAdjust(mOdeMass, actualMass);
@@ -1821,7 +1816,7 @@ void WbSolid::createOdeMass(bool reset) {
     // Translate the mass to solid's origin
     if (p->centerOfMass().size() == 1) {
       dVector3 t;
-      dSubtractVectors3(t, scaledCenterOfMass().ptr(), mReferenceMass->c);
+      dSubtractVectors3(t, centerOfMass().ptr(), mReferenceMass->c);
       dMassTranslate(mOdeMass, t[0], t[1], t[2]);
     }
 
@@ -1856,36 +1851,6 @@ void WbSolid::applyToOdeMass() {
 
   createOdeMass();
   mSolidMerger->mergeMass(this);
-}
-
-void WbSolid::propagateScale() {
-  // Sets new masses and new CoMs from top to bottom
-  WbMatter::propagateScale();
-
-  adjustOdeMass(false);  // rescale the ODE dMass in keeping with Webots density or mass value
-
-  if (mSolidMerger == NULL)
-    updateOdeGeomPosition();
-
-  foreach (WbSolid *const solid, mSolidChildren)
-    solid->propagateScale();
-
-  // Merges new masses and sets new geom and body positions, from bottom to top
-  if (isSolidMerger()) {
-    mSolidMerger->updateMasses();
-    mSolidMerger->setGeomAndBodyPositions();
-    mSolidMerger->setOdeDamping();
-  }
-
-  if (mSolidMerger)
-    applyMassCenterToWren();
-  else
-    WbWorld::instance()->awake();
-}
-
-void WbSolid::applyToOdeScale() {
-  propagateScale();
-  resetJoints();
 }
 
 void WbSolid::updateTransformForPhysicsStep() {
@@ -1936,7 +1901,7 @@ void WbSolid::applyPhysicsTransform() {
   }
 
   // find Solid merger's frame center in world coordinates
-  const WbVector3 &com = mSolidMerger->scaledCenterOfMass();
+  const WbVector3 &com = mSolidMerger->centerOfMass();
   if (com.isNull())
     dBodyCopyPosition(b, result);
   else
@@ -1944,28 +1909,25 @@ void WbSolid::applyPhysicsTransform() {
     dBodyGetRelPointPos(b, -com.x(), -com.y(), -com.z(), result);
   assert(!std::isnan(result[0]));
   // printf("new body pos = %f, %f, %f (apply phy.)\n", result[0], result[1], result[2]);
-  const WbTransform *const ut = upperTransform();
-  if (ut) {
-    const double invUtScale = 1.0 / ut->absoluteScale().x();
-    const double scaleFactor = invUtScale * invUtScale;
-    const WbMatrix4 &utm = ut->matrix();
-    const WbVector3 &prel = utm.pseudoInversed(WbVector3(result));
-    result[0] = scaleFactor * prel[0];
-    result[1] = scaleFactor * prel[1];
-    result[2] = scaleFactor * prel[2];
+  const WbPose *const up = upperPose();
+  if (up) {
+    const WbMatrix4 &upm = up->matrix();
+    const WbVector3 &prel = upm.pseudoInversed(WbVector3(result));
+    result[0] = prel[0];
+    result[1] = prel[1];
+    result[2] = prel[2];
     // printf("result = %f, %f, %f (apply phy.))\n", result[0], result[1], result[2]);
-    // find rotation difference between upper transform and solid child
-    const WbQuaternion &q = utm.extractedQuaternion(invUtScale);
+    // find rotation difference between upper pose and solid child
+    const WbQuaternion &q = upm.extractedQuaternion();
     dQMultiply1(qr, q.ptr(), dBodyGetQuaternion(b));
   }
 
-  if (std::isnan(qr[0]) || std::isnan(qr[1]) || std::isnan(qr[2]) || std::isnan(qr[3]) ||
-      (qr[1] == 0.0 && qr[2] == 0.0 && qr[3] == 0.0)) {
-    setTransformFromOde(result[0], result[1], result[2], 0.0, 1.0, 0.0, 0.0);
+  const double norm = sqrt(qr[1] * qr[1] + qr[2] * qr[2] + qr[3] * qr[3]);
+  if (std::isnan(qr[0]) || std::isnan(norm) || norm == 0.0) {
+    setTransformFromOde(result[0], result[1], result[2], 0.0, 0.0, 1.0, 0.0);
     return;
   }
 
-  const double norm = sqrt(qr[1] * qr[1] + qr[2] * qr[2] + qr[3] * qr[3]);
   double angle = 2.0 * atan2(norm, qr[0]);  // in the range [-2 * M_PI, 2 * M_PI]
   if (angle < -M_PI)
     angle += 2.0 * M_PI;
@@ -1977,7 +1939,7 @@ void WbSolid::applyPhysicsTransform() {
   qr[2] *= normInv;
   qr[3] *= normInv;
 
-  // block signals from WbTransform (baseclass): we don't want to update the bodies and the geoms
+  // block signals from WbPose (baseclass): we don't want to update the bodies and the geoms
   // printf("pos = %f, %f, %f\n", result[0], result[1], result[2]);
   setTransformFromOde(result[0], result[1], result[2], qr[1], qr[2], qr[3], angle);
 }
@@ -1988,8 +1950,18 @@ void WbSolid::applyPhysicsTransform() {
 
 void WbSolid::postPhysicsStep() {
   int i = 0;
-  dBodyID body = this->body();
-  if (body && dBodyIsEnabled(body))
+  dBodyID odeBody = this->body();
+
+  if (mResetPhysicsInStep) {
+    // physics reset from Supervisor: if the solid is also moved from Supervisor in the same step, ODE may overwrite velocities
+    // and forces based on the jerk
+    resetSingleSolidPhysics();
+    if (mSolidMerger)
+      mSolidMerger->setBodyArtificiallyDisabled(false);
+    mResetPhysicsInStep = false;
+  }
+
+  if (odeBody && dBodyIsEnabled(odeBody))
     applyPhysicsTransform();
 
   // Warning: do not use foreach here => Qt foreach loop are very inefficient here
@@ -2077,10 +2049,7 @@ WbRobot *WbSolid::robot() const {
 
 // Returns true if all solid ancestors have no physics
 bool WbSolid::belongsToStaticBasis() const {
-  if (isDynamic())
-    return false;
-
-  const WbSolid *s = upperSolid();
+  const WbSolid *s = this;
 
   while (s) {
     if (s->isDynamic())
@@ -2124,10 +2093,10 @@ void WbSolid::propagateSelection(bool selected) {
   select(selected);
   WbMatter::propagateSelection(selected);
 
-  foreach (WbBasicJoint *const joint, mJointChildren) {
-    if (joint->solidReference())
+  foreach (WbBasicJoint *const j, mJointChildren) {
+    if (j->solidReference())
       continue;
-    WbSolid *const solid = joint->solidEndPoint();
+    WbSolid *const solid = j->solidEndPoint();
     if (solid)
       solid->propagateSelection(selected);
   }
@@ -2143,7 +2112,7 @@ void WbSolid::setMatrixNeedUpdate() {
   if (g)
     g->setMatrixNeedUpdate();
 
-  WbTransform::setMatrixNeedUpdate();
+  WbPose::setMatrixNeedUpdate();
 }
 
 void WbSolid::reset(const QString &id) {
@@ -2156,8 +2125,8 @@ void WbSolid::reset(const QString &id) {
     p->reset(id);
 
   if (mJointParents.size() == 0) {
-    setTranslation(mSavedTranslations[id]);
-    setRotation(mSavedRotations[id]);
+    setTranslation(translationFromFile(id));
+    setRotation(rotationFromFile(id));
   }
   resetSingleSolidPhysics();
   resetContactPointsAndSupportPolygon();
@@ -2200,9 +2169,6 @@ void WbSolid::save(const QString &id) {
   WbNode *const p = mPhysics->value();
   if (p)
     p->save(id);
-
-  mSavedTranslations[id] = translation();
-  mSavedRotations[id] = rotation();
 }
 
 // Recursive reset methods
@@ -2217,17 +2183,17 @@ void WbSolid::jerk(bool resetVelocities, bool rootJerk) {
   foreach (WbSolid *const solid, mSolidChildren)
     solid->jerk(resetVelocities, false);
 
-  foreach (WbBasicJoint *const joint, mJointChildren)
-    joint->updateOdeWorldCoordinates();
+  foreach (WbBasicJoint *const j, mJointChildren)
+    j->updateOdeWorldCoordinates();
 
   if (isDynamic() && mJointParents.size() > 0 && rootJerk)
     emit positionChangedArtificially();
 }
 
-void WbSolid::notifyChildJerk(WbTransform *childNode) {
+void WbSolid::notifyChildJerk(WbPose *childNode) {
   WbNode *node = childNode->parentNode();
   while (node != this && node != NULL) {
-    if (mMovedChildren.contains(dynamic_cast<WbTransform *>(node)))
+    if (mMovedChildren.contains(dynamic_cast<WbPose *>(node)))
       return;
     node = node->parentNode();
   }
@@ -2237,17 +2203,17 @@ void WbSolid::notifyChildJerk(WbTransform *childNode) {
 
 void WbSolid::childrenJerk() {
   updateOdeGeomPosition();
-  foreach (WbTransform *childNode, mMovedChildren) {
-    QVector<WbSolid *> solidChildren;
-    QVector<WbBasicJoint *> jointChildren;
-    QVector<WbPropeller *> propellerChildren;
-    collectSolidChildren(childNode, false, solidChildren, jointChildren, propellerChildren);
+  foreach (WbPose *childNode, mMovedChildren) {
+    QVector<WbSolid *> solidChildrenList;
+    QVector<WbBasicJoint *> jointChildrenList;
+    QVector<WbPropeller *> propellerChildrenList;
+    collectSolidChildren(childNode, false, solidChildrenList, jointChildrenList, propellerChildrenList);
 
-    foreach (WbSolid *const solid, solidChildren)
+    foreach (WbSolid *const solid, solidChildrenList)
       solid->jerk(false, false);
 
-    foreach (WbBasicJoint *const joint, jointChildren)
-      joint->updateOdeWorldCoordinates();
+    foreach (WbBasicJoint *const j, jointChildrenList)
+      j->updateOdeWorldCoordinates();
   }
   mMovedChildren.clear();
 }
@@ -2290,9 +2256,10 @@ void WbSolid::resetPhysics(bool recursive) {
   resetSingleSolidPhysics();
 
   // Recurses through all first level solid descendants
-  if (recursive)
+  if (recursive) {
     foreach (WbSolid *const solid, mSolidChildren)
       solid->resetPhysics();
+  }
 }
 
 void WbSolid::resetSingleSolidPhysics() {
@@ -2333,13 +2300,24 @@ void WbSolid::resetSingleSolidPhysics() {
         dJointSetSliderParam(mJoint, dParamFMax, 0.0);
         dJointSetSliderParam(mJoint, dParamVel, 0.0);
         break;
-      default:  // only the two above joint types are currently implemented in Webots
+      case dJointTypeBall:
+        dJointSetBallParam(mJoint, dParamFMax, 0.0);
+        dJointSetBallParam(mJoint, dParamVel, 0.0);
+        dJointSetBallParam(mJoint, dParamFMax2, 0.0);
+        dJointSetBallParam(mJoint, dParamVel2, 0.0);
+        dJointSetBallParam(mJoint, dParamFMax3, 0.0);
+        dJointSetBallParam(mJoint, dParamVel3, 0.0);
+        break;
+      default:  // only the above joint types are currently implemented in Webots
         break;
     }
   }
 }
 
-void WbSolid::pausePhysics() {
+void WbSolid::pausePhysics(bool resumeAutomatically) {
+  if (resumeAutomatically)
+    mResetPhysicsInStep = true;
+
   if (mSolidMerger)
     mSolidMerger->setBodyArtificiallyDisabled(true);
 
@@ -2445,29 +2423,13 @@ const WbPolygon &WbSolid::supportPolygon() {
   const WbVector3 &eastVector = worldInfo->eastVector();
   const WbVector3 &northVector = worldInfo->northVector();
   // Rules out 4 trivial cases
-  if (numberOfContactPoints == 0) {
-    mSupportPolygon.setActualSize(0);
-    return mSupportPolygon;
-  }
-
-  const WbVector3 &v0 = mGlobalListOfContactPoints[0];
-  mSupportPolygon[0].setXy(v0.dot(northVector), v0.dot(eastVector));
-  if (numberOfContactPoints == 1) {
-    mSupportPolygon.setActualSize(1);
-    return mSupportPolygon;
-  }
-
-  const WbVector3 &v1 = mGlobalListOfContactPoints[1];
-  mSupportPolygon[1].setXy(v1.dot(northVector), v1.dot(eastVector));
-  if (numberOfContactPoints == 2) {
-    mSupportPolygon.setActualSize(2);
-    return mSupportPolygon;
-  }
-
-  const WbVector3 &v2 = mGlobalListOfContactPoints[2];
-  mSupportPolygon[2].setXy(v2.dot(northVector), v2.dot(eastVector));
-  if (numberOfContactPoints == 3) {
-    mSupportPolygon.setActualSize(3);
+  if (numberOfContactPoints <= 3) {
+    assert(mSupportPolygon.size() >= numberOfContactPoints);
+    for (int i = 0; i < numberOfContactPoints; ++i) {
+      const WbVector3 &v = mGlobalListOfContactPoints.at(i);
+      mSupportPolygon[i].setXy(v.dot(northVector), v.dot(eastVector));
+    }
+    mSupportPolygon.setActualSize(numberOfContactPoints);
     return mSupportPolygon;
   }
 
@@ -2517,6 +2479,9 @@ bool WbSolid::showSupportPolygonRepresentation(bool enabled) {
       mSupportPolygonRepresentation = new WbSupportPolygonRepresentation();
       mSupportPolygonNeedsUpdate = true;
     }
+    if (mSupportPolygon.size() < 4)
+      // minimum expected size to rule out trivial cases
+      mSupportPolygon.resize(4);
     connect(WbSimulationState::instance(), &WbSimulationState::physicsStepStarted, this,
             &WbSolid::refreshSupportPolygonRepresentation, Qt::UniqueConnection);
     connect(WbSimulationState::instance(), &WbSimulationState::physicsStepStarted, this,
@@ -2761,8 +2726,8 @@ void WbSolid::displayWarning() {
 
     if (inertialMatrixDiagonalMin > 0.0 &&
         // inertialMatrixDiagonalMax > 0.0 && // this is ensured
-        inertialMatrixDiagonalMin < 1.0e-5 &&                         // light object : this theshold is empirical
-        inertialMatrixDiagonalMax / inertialMatrixDiagonalMin > 15.0  // oblong object : this theshold is empirical
+        inertialMatrixDiagonalMin < 1.0e-5 &&                         // light object : this threshold is empirical
+        inertialMatrixDiagonalMax / inertialMatrixDiagonalMin > 15.0  // oblong object : this threshold is empirical
     )
       parsingWarn(tr("Webots has detected that this solid is light and oblong according to its inertia matrix. "
                      "This belongs in the physics edge cases, and can imply weird physical results. "
@@ -2801,24 +2766,24 @@ void WbSolid::collectHiddenKinematicParameters(HiddenKinematicParametersMap &map
   if (mSolidMerger == NULL || merger) {
     // TODO: implement an mIsVisible flag in WbNode for sake of efficiency
     WbBasicJoint *parentJoint = jointParent();
-    if (parentJoint && parentJoint->nodeType() != WB_NODE_BALL_JOINT) {
+    if (parentJoint) {
       // remove unquantified ODE effects on the endPoint Solid
       parentJoint->computeEndPointSolidPositionFromParameters(translationToBeCopied, rotationToBeCopied);
       // Note:
       //   This is an exception to the global double precision which is not sufficient here,
       //   because the accumulated error is big in computeEndPointSolidPositionFromParameters().
       //   cf. https://github.com/omichel/webots-dev/issues/6512
-      if (!translationToBeCopied.almostEquals(mSavedTranslations[stateId()],
+      if (!translationToBeCopied.almostEquals(translationFromFile(stateId()),
                                               100000.0 * std::numeric_limits<double>::epsilon()) &&
           !isTranslationFieldVisible())
         copyTranslation = true;
-      if (!rotationToBeCopied.almostEquals(mSavedRotations[stateId()], 100000.0 * std::numeric_limits<double>::epsilon()) &&
+      if (!rotationToBeCopied.almostEquals(rotationFromFile(stateId()), 100000.0 * std::numeric_limits<double>::epsilon()) &&
           !isRotationFieldVisible())
         copyRotation = true;
     } else {
-      if (translation() != mSavedTranslations[stateId()] && !isTranslationFieldVisible())
+      if (translation() != translationFromFile(stateId()) && !isTranslationFieldVisible())
         t = &translation();
-      if (rotation() != mSavedRotations[stateId()] && !isRotationFieldVisible())
+      if (rotation() != rotationFromFile(stateId()) && !isRotationFieldVisible())
         r = &rotation();
     }
 
@@ -2840,23 +2805,26 @@ void WbSolid::collectHiddenKinematicParameters(HiddenKinematicParametersMap &map
     if (j) {
       WbVector3 v(NAN, NAN, NAN);
 
-      const WbJointParameters *const p = j->parameters();
       // TODO: implement an mIsVisible flag in WbNode for sake of efficiency
-      const bool invisible1 = p == NULL || !WbNodeUtilities::isVisible(p->findField("position"));
-      const double pos1 = j->position();
-      if (invisible1 && pos1 != j->initialPosition())
-        v[0] = pos1;
+      const WbJointParameters *const p = j->parameters();
+      if ((p == NULL || !WbVrmlNodeUtilities::isVisible(p->findField("position"))) && j->position() != j->initialPosition())
+        v[0] = j->position();
 
-      if (j->nodeType() == WB_NODE_HINGE_2_JOINT) {
+      if (j->nodeType() == WB_NODE_HINGE_2_JOINT || j->nodeType() == WB_NODE_BALL_JOINT) {
         const WbJointParameters *const p2 = j->parameters2();
-        // TODO: implement an mIsVisible flag in WbNode for sake of efficiency
-        const bool invisible2 = p2 == NULL || !WbNodeUtilities::isVisible(p2->findField("position"));
-        const double pos2 = j->position(2);
-        if (invisible2 && pos2 != j->initialPosition(2))
-          v[1] = pos2;
+        if ((p2 == NULL || !WbVrmlNodeUtilities::isVisible(p2->findField("position"))) &&
+            j->position(2) != j->initialPosition(2))
+          v[1] = j->position(2);
       }
 
-      if (!std::isnan(v[0]) || !std::isnan(v[1]))
+      if (j->nodeType() == WB_NODE_BALL_JOINT) {
+        const WbJointParameters *const p3 = j->parameters3();
+        if ((p3 == NULL || !WbVrmlNodeUtilities::isVisible(p3->findField("position"))) &&
+            j->position(3) != j->initialPosition(3))
+          v[2] = j->position(3);
+      }
+
+      if (!std::isnan(v[0]) || !std::isnan(v[1]) || !std::isnan(v[2]))
         positions.insert(i, new WbVector3(v));
     }
   }
@@ -2916,8 +2884,7 @@ void WbSolid::enable(bool enabled, bool ode) {
   }
 }
 
-void WbSolid::exportURDFShape(WbVrmlWriter &writer, const QString &geometry, const WbTransform *transform,
-                              bool correctOrientation, const WbVector3 &offset) const {
+void WbSolid::exportUrdfShape(WbWriter &writer, const QString &geometry, const WbPose *pose, const WbVector3 &offset) const {
   const QStringList element = QStringList() << "visual"
                                             << "collision";
   for (int j = 0; j < element.size(); ++j) {
@@ -2925,23 +2892,17 @@ void WbSolid::exportURDFShape(WbVrmlWriter &writer, const QString &geometry, con
     writer.indent();
     writer << QString("<%1>\n").arg(element[j]);
     writer.increaseIndent();
-    if (transform != this || correctOrientation || !offset.isNull()) {
-      WbVector3 translation = transform->translation() + offset;
-      WbRotation rotation = transform->rotation();
+    if (pose != this || !offset.isNull()) {
+      WbVector3 translation = pose->translation() + offset;
+      WbRotation rotation = pose->rotation();
       writer.indent();
-      if (correctOrientation) {
-        if (transform == this) {
-          translation = offset;
-          rotation = WbRotation(1.0, 0.0, 0.0, 1.5707963);
-        } else
-          rotation = WbRotation(rotation.toMatrix3() * WbRotation(1.0, 0.0, 0.0, 1.5707963).toMatrix3());
-      } else if (transform == this) {
+      if (pose == this) {
         rotation = WbRotation(0.0, 1.0, 0.0, 0.0);
         translation = offset;
       }
       writer << QString("<origin xyz=\"%1\" rpy=\"%2\"/>\n")
-                  .arg(translation.toString(WbPrecision::FLOAT_MAX))
-                  .arg(rotation.toMatrix3().toEulerAnglesZYX().toString(WbPrecision::FLOAT_MAX));
+                  .arg(translation.toString(WbPrecision::FLOAT_ROUND_6))
+                  .arg(rotation.toMatrix3().toEulerAnglesZYX().toString(WbPrecision::FLOAT_ROUND_6));
     }
     writer.indent();
     writer << "<geometry>\n";
@@ -2958,7 +2919,7 @@ void WbSolid::exportURDFShape(WbVrmlWriter &writer, const QString &geometry, con
   }
 }
 
-bool WbSolid::exportNodeHeader(WbVrmlWriter &writer) const {
+bool WbSolid::exportNodeHeader(WbWriter &writer) const {
   if (writer.isUrdf()) {
     const bool ret = WbMatter::exportNodeHeader(writer);
     if (!ret) {
@@ -2971,40 +2932,39 @@ bool WbSolid::exportNodeHeader(WbVrmlWriter &writer) const {
           const WbSphere *sphere = dynamic_cast<const WbSphere *>(node);
           const WbCapsule *capsule = dynamic_cast<const WbCapsule *>(node);
           if (box || cylinder || sphere || capsule) {
-            const WbTransform *transform = WbNodeUtilities::findUpperTransform(node);
-            QList<QPair<QString, WbVector3>> geometries;  // string of the geometry and its offset
+            const WbPose *pose = WbNodeUtilities::findUpperPose(node);
+            QList<std::pair<QString, WbVector3>> geometries;  // string of the geometry and its offset
 
             if (box) {
-              QPair<QString, WbVector3> pair;
+              std::pair<QString, WbVector3> pair;
               pair.first = QString("<box size=\"%1 %2 %3\"/>\n").arg(box->size().x()).arg(box->size().y()).arg(box->size().z());
               geometries << pair;
             } else if (cylinder) {
-              QPair<QString, WbVector3> pair;
+              std::pair<QString, WbVector3> pair;
               pair.first = QString("<cylinder radius=\"%1\" length=\"%2\"/>\n").arg(cylinder->radius()).arg(cylinder->height());
               geometries << pair;
             } else if (capsule) {
-              QPair<QString, WbVector3> pair;
+              std::pair<QString, WbVector3> pair;
               pair.first = QString("<cylinder radius=\"%1\" length=\"%2\"/>\n").arg(capsule->radius()).arg(capsule->height());
               geometries << pair;
               pair.first = QString("<sphere radius=\"%1\"/>\n").arg(capsule->radius());
               pair.second = WbVector3(0.0, 0.5 * capsule->height(), 0.0);
-              if (transform)
-                pair.second = transform->rotation().toMatrix3() * pair.second;
+              if (pose)
+                pair.second = pose->rotation().toMatrix3() * pair.second;
               geometries << pair;
               pair.first = QString("<sphere radius=\"%1\"/>\n").arg(capsule->radius());
               pair.second = WbVector3(0.0, -0.5 * capsule->height(), 0.0);
-              if (transform)
-                pair.second = transform->rotation().toMatrix3() * pair.second;
+              if (pose)
+                pair.second = pose->rotation().toMatrix3() * pair.second;
               geometries << pair;
             } else if (sphere) {
-              QPair<QString, WbVector3> pair;
+              std::pair<QString, WbVector3> pair;
               pair.first = QString("<sphere radius=\"%1\"/>\n").arg(sphere->radius());
               geometries << pair;
             } else
               assert(false);
             for (int j = 0; j < geometries.size(); ++j)
-              exportURDFShape(writer, geometries[j].first, transform, cylinder || capsule,
-                              geometries[j].second + writer.jointOffset());
+              exportUrdfShape(writer, geometries[j].first, pose, geometries[j].second + writer.jointOffset());
           }
         }
       }
@@ -3015,29 +2975,27 @@ bool WbSolid::exportNodeHeader(WbVrmlWriter &writer) const {
   return WbMatter::exportNodeHeader(writer);
 }
 
-void WbSolid::exportNodeFields(WbVrmlWriter &writer) const {
+void WbSolid::exportNodeFields(WbWriter &writer) const {
   WbMatter::exportNodeFields(writer);
   if (writer.isX3d()) {
     if (!name().isEmpty())
-      writer << " name='" << name() << "'";
-    writer << " solid='true'";
+      writer << " name='" << sanitizedName() << "'";
+    writer << " type='solid'";
   }
 }
 
-void WbSolid::exportNodeFooter(WbVrmlWriter &writer) const {
-  if (writer.isX3d() && boundingObject()) {
-    writer << "<Switch whichChoice='-1' class='selector'>";
-    const WbGeometry *geom = dynamic_cast<const WbGeometry *>(boundingObject());
-    if (geom)
-      writer << "<Shape>";
-
+void WbSolid::exportNodeFooter(WbWriter &writer) const {
+  if (writer.isX3d() && boundingObject())
     boundingObject()->exportBoundingObjectToX3D(writer);
 
-    if (geom)
-      writer << "</Shape>";
-
-    writer << "</Switch>";
-  }
-
   WbMatter::exportNodeFooter(writer);
+}
+
+const QString WbSolid::sanitizedName() const {
+  QString name_dirty = name();
+  name_dirty.replace("\'", "&apos;", Qt::CaseInsensitive);
+  name_dirty.replace("\"", "&quot;", Qt::CaseInsensitive);
+  name_dirty.replace(">", "&gt;", Qt::CaseInsensitive);
+  name_dirty.replace("<", "&lt;", Qt::CaseInsensitive);
+  return name_dirty.replace("&", "&amp;", Qt::CaseInsensitive);
 }

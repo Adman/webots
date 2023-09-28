@@ -1,11 +1,11 @@
 /*
- * Copyright 1996-2021 Cyberbotics Ltd.
+ * Copyright 1996-2023 Cyberbotics Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -92,12 +92,12 @@ static void automatic_behavior() {
 }
 
 static void display_helper_message() {
-  printf("Control commands:\n");
-  printf(" Arrows:       Move the robot\n");
-  printf(" Page Up/Down: Rotate the robot\n");
-  printf(" +/-:          (Un)grip\n");
-  printf(" Shift + arrows:   Handle the arm\n");
-  printf(" Space: Reset\n");
+  printf("\n \nControl commands:\n");
+  printf(" Arrows:         Move the robot\n");
+  printf(" Page Up/Down:   Rotate the robot\n");
+  printf(" +/-:            (Un)grip\n");
+  printf(" Shift + arrows: Handle the arm\n");
+  printf(" Space:          Reset\n");
 }
 
 int main(int argc, char **argv) {
@@ -123,28 +123,22 @@ int main(int argc, char **argv) {
     if ((c >= 0) && c != pc) {
       switch (c) {
         case WB_KEYBOARD_UP:
-          printf("Go forwards\n");
-          base_forwards();
+          base_forwards_increment();
           break;
         case WB_KEYBOARD_DOWN:
-          printf("Go backwards\n");
-          base_backwards();
+          base_backwards_increment();
           break;
         case WB_KEYBOARD_LEFT:
-          printf("Strafe left\n");
-          base_strafe_left();
+          base_strafe_left_increment();
           break;
         case WB_KEYBOARD_RIGHT:
-          printf("Strafe right\n");
-          base_strafe_right();
+          base_strafe_right_increment();
           break;
         case WB_KEYBOARD_PAGEUP:
-          printf("Turn left\n");
-          base_turn_left();
+          base_turn_left_increment();
           break;
         case WB_KEYBOARD_PAGEDOWN:
-          printf("Turn right\n");
-          base_turn_right();
+          base_turn_right_increment();
           break;
         case WB_KEYBOARD_END:
         case ' ':

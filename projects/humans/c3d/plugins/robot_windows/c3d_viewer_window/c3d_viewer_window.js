@@ -1,12 +1,12 @@
-/* global webots */
-/* global PlotWidget, TimeplotWidget */
+/* global Canvas, PlotWidget, TimeplotWidget */
 /* eslint no-unused-vars: ["error", { "varsIgnorePattern": "Callback", "argsIgnorePattern": "^_"}] */
 
-var robotWindow = null;
+import RobotWindow from 'https://cyberbotics.com/wwi/R2023b/RobotWindow.js';
+
 var basicTimeStep = 0.032;
 var graphs = {};
 
-function menuTabCallback(category) {
+window.menuTabCallback = function(category) {
   let i, x, tablinks;
   x = document.getElementsByClassName('content');
   for (i = 0; i < x.length; ++i)
@@ -17,33 +17,43 @@ function menuTabCallback(category) {
   document.getElementById(category + '-tab').style.display = 'block';
   document.getElementById(category + '-menu-button').className += ' menu-button-selected';
 
-  // force widgets graphs when they are shown.
+  const canvas = new Canvas();
+  canvas.clearCanvas();
+  updateTabCallback();
+}
+
+window.updateTabCallback = function() {
+  const canvas = new Canvas();
+  canvas.resizeCanvas();
   Object.keys(graphs).forEach(function(name) {
     graphs[name].forEach(function(widget) {
-      if (widget.shown)
-        widget.refresh();
+      if (widget.shown) {
+        widget.resize();
+        widget.refresh(true);
+      }
     });
   });
 }
 
-function checkboxCallback(checkbox) {
+window.checkboxCallback = function(checkbox) {
   if (checkbox.checked)
-    robotWindow.send('enable:' + checkbox.getAttribute('marker'), 'c3d_viewer');
+    window.robotWindow.send('enable:' + checkbox.getAttribute('marker'));
   else
-    robotWindow.send('disable:' + checkbox.getAttribute('marker'), 'c3d_viewer');
+    window.robotWindow.send('disable:' + checkbox.getAttribute('marker'));
 }
 
-function sliderCallback(slider) {
+
+window.sliderCallback = function(slider) {
   const marker = slider.getAttribute('marker');
   document.getElementById('slider_value_' + marker).innerHTML = slider.value;
-  robotWindow.send('radius:' + slider.value + ':' + marker, 'c3d_viewer');
+  window.robotWindow.send('radius:' + slider.value + ':' + marker);
 }
 
-function colorCallback(color) {
-  robotWindow.send('color:' + color.value + ':' + color.getAttribute('marker'), 'c3d_viewer');
+window.colorCallback = function(color) {
+  window.robotWindow.send('color:' + color.value + ':' + color.getAttribute('marker'));
 }
 
-function comboboxCallback(combobox) {
+window.comboboxCallback = function(combobox) {
   let markerGraphs = graphs[combobox.getAttribute('marker')];
   markerGraphs.forEach(function(widget) {
     widget.show(false);
@@ -51,7 +61,7 @@ function comboboxCallback(combobox) {
   markerGraphs[combobox.selectedIndex].show(true);
 }
 
-function changeColor(virtual, color) {
+window.changeColor = function(virtual, color) {
   let div = virtual ? document.getElementById('virtual_markers') : document.getElementById('markers');
   let colorSelectors = div.getElementsByClassName('colorSelector');
   let message = 'color:' + color;
@@ -59,10 +69,10 @@ function changeColor(virtual, color) {
     colorSelectors[i].value = color;
     message += ':' + colorSelectors[i].getAttribute('marker');
   }
-  robotWindow.send(message, 'c3d_viewer');
+  window.robotWindow.send(message);
 }
 
-function changeRadius(virtual, radius) {
+window.changeRadius = function(virtual, radius) {
   let div = virtual ? document.getElementById('virtual_markers') : document.getElementById('markers');
   let radiusSliders = div.getElementsByClassName('radiusSlider');
   let message = 'radius:' + radius;
@@ -72,10 +82,10 @@ function changeRadius(virtual, radius) {
     message += ':' + marker;
     document.getElementById('slider_value_' + marker).innerHTML = radius;
   }
-  robotWindow.send(message, 'c3d_viewer');
+  window.robotWindow.send(message);
 }
 
-webots.window('c3d_viewer_window').receive = function(message, _robot) {
+function receive(message, robot) {
   if (message.startsWith('configure:')) {
     var values = message.split(':');
     basicTimeStep = 0.001 * values[1];
@@ -127,19 +137,19 @@ webots.window('c3d_viewer_window').receive = function(message, _robot) {
           '</select>' +
           '</h3>' +
           '<div id="' + name + '-graph" class="marker-plot-content"/></div>' +
+          '<div class="plot-background"/>' +
           '</div>';
         tmp.innerHTML = div;
         document.getElementById('graphs-' + type).appendChild(tmp.firstChild);
 
-        let widgetTime = new TimeplotWidget(document.getElementById(name + '-graph'), basicTimeStep, TimeplotWidget.prototype
-          .AutoRangeType.STRETCH, {
+        let widgetTime = new TimeplotWidget(document.getElementById(name + '-graph'), basicTimeStep, TimeplotWidget.AutoRangeType.STRETCH, {
           'min': -1,
           'max': 1
         }, {
           'x': 'Time [s]',
           'y': '[' + unit + ']'
         }, null);
-        let widgetXY = new PlotWidget(document.getElementById(name + '-graph'), TimeplotWidget.prototype.AutoRangeType.STRETCH, {
+        let widgetXY = new PlotWidget(document.getElementById(name + '-graph'), TimeplotWidget.AutoRangeType.STRETCH, {
           'x': 0,
           'y': 1
         }, {
@@ -152,7 +162,7 @@ webots.window('c3d_viewer_window').receive = function(message, _robot) {
           'x': 'x [' + unit + ']',
           'y': 'y [' + unit + ']'
         }, null);
-        let widgetYZ = new PlotWidget(document.getElementById(name + '-graph'), TimeplotWidget.prototype.AutoRangeType.STRETCH, {
+        let widgetYZ = new PlotWidget(document.getElementById(name + '-graph'), TimeplotWidget.AutoRangeType.STRETCH, {
           'x': 1,
           'y': 2
         }, {
@@ -165,7 +175,7 @@ webots.window('c3d_viewer_window').receive = function(message, _robot) {
           'x': 'y [' + unit + ']',
           'y': 'z [' + unit + ']'
         }, null);
-        let widgetXZ = new PlotWidget(document.getElementById(name + '-graph'), TimeplotWidget.prototype.AutoRangeType.STRETCH, {
+        let widgetXZ = new PlotWidget(document.getElementById(name + '-graph'), TimeplotWidget.AutoRangeType.STRETCH, {
           'x': 0,
           'y': 2
         }, {
@@ -216,8 +226,10 @@ webots.window('c3d_viewer_window').receive = function(message, _robot) {
     console.log('Unknown message received: "' + message + '"');
 };
 
-webots.window('c3d_viewer_window').init(function() {
-  robotWindow = webots.window('c3d_viewer_window');
+window.onload = function() {
+  window.robotWindow = new RobotWindow();
+  window.robotWindow.receive = receive;
+  window.robotWindow.send("configure");
   PlotWidget.recordDataInBackground = true;
   TimeplotWidget.recordDataInBackground = true;
 
@@ -228,7 +240,7 @@ webots.window('c3d_viewer_window').init(function() {
     reader.onload = (function(_theFile) {
       return function(e) {
         const message = 'c3dfile:' + e.target.result.slice(e.target.result.indexOf(';base64,') + 8); // remove the "*;base64," header
-        robotWindow.send(message, 'c3d_viewer');
+        window.robotWindow.send(message);
       };
     })(f);
     reader.readAsDataURL(f); // perform base64 encoding suitable for sending text through the wwi interface
@@ -236,7 +248,7 @@ webots.window('c3d_viewer_window').init(function() {
 
   function enableGraphs(event) {
     let checkbox = event.target;
-    robotWindow.send('graphs:' + checkbox.getAttribute('graphtype') + ':' + checkbox.checked, 'c3d_viewer');
+    window.robotWindow.send('graphs:' + checkbox.getAttribute('graphtype') + ':' + checkbox.checked);
   }
   document.getElementById('graph-markers-checkbox').addEventListener('click', enableGraphs);
   document.getElementById('graph-virtual-markers-checkbox').addEventListener('click', enableGraphs);
@@ -253,7 +265,7 @@ webots.window('c3d_viewer_window').init(function() {
       checkboxes[i].checked = !hide;
       message += ':' + checkboxes[i].getAttribute('marker');
     }
-    robotWindow.send(message, 'c3d_viewer');
+    window.robotWindow.send(message);
   }
   document.getElementById('select_markers').addEventListener('click', function() {
     hideShowAll(false, false);
@@ -282,12 +294,12 @@ webots.window('c3d_viewer_window').init(function() {
   document.getElementById('transparency-slider').addEventListener('change', function(event) {
     let slider = event.target;
     document.getElementById('slider_value_transparency').innerHTML = slider.value;
-    robotWindow.send('body_transparency:' + slider.value, 'c3d_viewer');
+    window.robotWindow.send('body_transparency:' + slider.value);
   });
   document.getElementById('speed-slider').addEventListener('change', function(event) {
     let slider = event.target;
     document.getElementById('slider_value_speed').innerHTML = slider.value;
-    robotWindow.send('speed:' + slider.value, 'c3d_viewer');
+    window.robotWindow.send('speed:' + slider.value);
   });
   document.getElementById('config-menu-button').addEventListener('click', function() {
     menuTabCallback('config');
@@ -311,4 +323,7 @@ webots.window('c3d_viewer_window').init(function() {
     menuTabCallback('powers');
   });
   menuTabCallback('config');
-});
+
+  window.addEventListener('resize', updateTabCallback);
+  window.addEventListener('scroll', updateTabCallback);
+}

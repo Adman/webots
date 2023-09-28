@@ -1,4 +1,8 @@
-#VRML_SIM R2021b utf8
+#VRML_SIM R2023b utf8
+
+EXTERNPROTO "webots://tests/default/protos/TestSuiteEmitter.proto"
+EXTERNPROTO "webots://tests/default/protos/TestSuiteSupervisor.proto"
+
 DEF WORLDINFO WorldInfo {
   coordinateSystem "NUE"
 }
@@ -26,6 +30,12 @@ DEF SPHERE0 Solid {
   ]
   boundingObject USE SPHERE
 }
+Transform {
+  children [
+    DEF SHAPE Shape {
+    }
+  ]
+}
 Robot {
   children [
     DistanceSensor {
@@ -39,10 +49,10 @@ Robot {
     }
     TestSuiteEmitter {
     }
-    DEF IMPORT_TEST Transform {
+    DEF IMPORT_TEST Pose {
       translation -0.34 0 0
     }
-    Transform {
+    Pose {
       translation 0.2 0 0
       children [
         USE IMPORT_TEST
@@ -52,8 +62,18 @@ Robot {
   controller "supervisor_import_remove"
   supervisor TRUE
 }
-Robot {
-  name "robot(1)"
+DEF LISTENER Robot {
+  translation 0.1 0 0.1
+  children [
+    TestSuiteEmitter {
+    }
+  ]
+  name "robot listener"
+  controller "supervisor_notify_import_remove_mfnode"
+  supervisor TRUE
+}
+DEF REMOVE_SELF Robot {
+  name "robot remove self"
   controller "supervisor_remove_self"
   supervisor TRUE
 }

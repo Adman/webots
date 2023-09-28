@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,13 +20,25 @@ void WbMFColor::readAndAddItem(WbTokenizer *tokenizer, const QString &worldPath)
   const double r = tokenizer->nextToken()->toDouble();
   const double g = tokenizer->nextToken()->toDouble();
   const double b = tokenizer->nextToken()->toDouble();
-  mVector.append(WbRgb(r, g, b));
+  WbRgb color(r, g, b);
+  if (color.clampValuesIfNeeded())
+    tokenizer->reportError(
+      tr("Expected positive color values in range [0.0, 1.0], found [%1 %2 %3]. MFColor field item %4 reset to [%5 %6 %7]")
+        .arg(r)
+        .arg(g)
+        .arg(b)
+        .arg(mVector.size())
+        .arg(color.red())
+        .arg(color.green())
+        .arg(color.blue()));
+  mVector.append(color);
 }
 
 void WbMFColor::clear() {
   if (!mVector.empty()) {
     mVector.clear();
     emit changed();
+    emit cleared();  // notify that all children have been removed
   }
 }
 

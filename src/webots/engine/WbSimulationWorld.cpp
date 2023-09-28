@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,9 +15,11 @@
 #include "WbSimulationWorld.hpp"
 
 #include "WbBoundingSphere.hpp"
-#include "WbDownloader.hpp"
+#include "WbDownloadManager.hpp"
+#include "WbLog.hpp"
 #include "WbMassChecker.hpp"
 #include "WbNodeOperations.hpp"
+#include "WbNodeUtilities.hpp"
 #include "WbOdeContact.hpp"
 #include "WbOdeContext.hpp"
 #include "WbOdeDebugger.hpp"
@@ -33,6 +35,7 @@
 #include "WbSimulationState.hpp"
 #include "WbSoundEngine.hpp"
 #include "WbTemplateManager.hpp"
+#include "WbTokenizer.hpp"
 #include "WbViewpoint.hpp"
 #include "WbWrenRenderingContext.hpp"
 
@@ -46,8 +49,8 @@ WbSimulationWorld *WbSimulationWorld::instance() {
   return static_cast<WbSimulationWorld *>(WbWorld::instance());
 }
 
-WbSimulationWorld::WbSimulationWorld(WbProtoList *protos, WbTokenizer *tokenizer) :
-  WbWorld(protos, tokenizer),
+WbSimulationWorld::WbSimulationWorld(WbTokenizer *tokenizer) :
+  WbWorld(tokenizer),
   mCluster(NULL),
   mOdeContext(new WbOdeContext()),  // create ODE worlds and spaces
   mPhysicsPlugin(NULL),
@@ -58,12 +61,12 @@ WbSimulationWorld::WbSimulationWorld(WbProtoList *protos, WbTokenizer *tokenizer
 
   emit worldLoadingStatusHasChanged(tr("Downloading assets"));
   emit worldLoadingHasProgressed(0);
-  WbDownloader::reset();
+  WbDownloadManager::instance()->reset();
   root()->downloadAssets();
-  int progress = WbDownloader::progress();
+  int progress = WbDownloadManager::instance()->progress();
   while (progress < 100) {
     QCoreApplication::processEvents(QEventLoop::WaitForMoreEvents);
-    int newProgress = WbDownloader::progress();
+    int newProgress = WbDownloadManager::instance()->progress();
     if (newProgress != progress) {
       progress = newProgress;
       emit worldLoadingHasProgressed(progress);
@@ -71,6 +74,10 @@ WbSimulationWorld::WbSimulationWorld(WbProtoList *protos, WbTokenizer *tokenizer
   }
 
   mSleepRealTime = basicTimeStep();
+
+  WbPerformanceLog *log = WbPerformanceLog::instance();
+  if (log)
+    log->setTimeStep(basicTimeStep());
 
   WbSimulationState::instance()->resetTime();
   // Reset random seed to ensure reproducible simulations.
@@ -93,8 +100,6 @@ WbSimulationWorld::WbSimulationWorld(WbProtoList *protos, WbTokenizer *tokenizer
       mPhysicsPlugin = NULL;
     }
   }
-
-  emit worldLoadingStatusHasChanged(tr("Finalizing nodes"));
 
   setIsLoading(true);
   root()->finalize();
@@ -120,6 +125,9 @@ WbSimulationWorld::WbSimulationWorld(WbProtoList *protos, WbTokenizer *tokenizer
 
   WbSoundEngine::setWorld(this);
 
+  if (log)
+    log->stopMeasure(WbPerformanceLog::LOADING);
+
   connect(mTimer, &QTimer::timeout, this, &WbSimulationWorld::triggerStepFromTimer);
   const WbSimulationState *const s = WbSimulationState::instance();
   connect(s, &WbSimulationState::rayTracingEnabled, this, &WbSimulationWorld::rayTracingEnabled);
@@ -130,6 +138,13 @@ WbSimulationWorld::WbSimulationWorld(WbProtoList *protos, WbTokenizer *tokenizer
   connect(this, &WbSimulationWorld::cameraRenderingStarted, s, &WbSimulationState::cameraRenderingStarted);
   connect(worldInfo(), &WbWorldInfo::optimalThreadCountChanged, this, &WbSimulationWorld::updateNumberOfThreads);
   connect(worldInfo(), &WbWorldInfo::randomSeedChanged, this, &WbSimulationWorld::updateRandomSeed);
+
+  if (WbTokenizer::worldFileVersion() < WbVersion(2021, 1, 1))
+    WbLog::info(tr("You are using a world from an old version of Webots. The backwards compability algorithm will try to "
+                   "convert it. Refer to the wiki for more information: "
+                   "https://cyberbotics.com/doc/guide/upgrading-webots"));
+
+  WbNodeUtilities::fixBackwardCompatibility(WbWorld::instance()->root());
 }
 
 WbSimulationWorld::~WbSimulationWorld() {
@@ -287,12 +302,16 @@ void WbSimulationWorld::restartStepTimer() {
 }
 
 void WbSimulationWorld::modeChanged() {
+  WbPerformanceLog *log = WbPerformanceLog::instance();
+
   const WbSimulationState::Mode mode = WbSimulationState::instance()->mode();
   switch (mode) {
     case WbSimulationState::PAUSE:
       mTimer->stop();
       WbSoundEngine::setPause(true);
       WbSoundEngine::setMute(WbPreferences::instance()->value("Sound/mute").toBool());
+      if (log)
+        log->stopMeasure(WbPerformanceLog::SPEED_FACTOR);
       break;
     case WbSimulationState::STEP:
       WbSoundEngine::setMute(WbPreferences::instance()->value("Sound/mute").toBool());
@@ -387,7 +406,8 @@ void WbSimulationWorld::reset(bool restartControllers) {
     }
   }
   updateRandomSeed();
-  WbSimulationState::instance()->resumeSimulation();
+  if (WbDownloadManager::instance()->progress() == 100)
+    WbSimulationState::instance()->resumeSimulation();
   if (mPhysicsPlugin)
     mPhysicsPlugin->init();
   storeLastSaveTime();

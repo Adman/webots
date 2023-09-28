@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,6 +15,7 @@
 #include "WbEmitter.hpp"
 
 #include "WbDataPacket.hpp"
+#include "WbDataStream.hpp"
 #include "WbFieldChecker.hpp"
 #include "WbReceiver.hpp"
 
@@ -33,9 +34,11 @@ void WbEmitter::init() {
   mBaudRate = findSFInt("baudRate");
   mByteSize = findSFInt("byteSize");
   mBufferSize = findSFInt("bufferSize");
+  mAllowedChannels = findMFInt("allowedChannels");
   mNeedToSetRange = false;
   mNeedToSetChannel = false;
   mNeedToSetBufferSize = false;
+  mNeedToSetAllowedChannels = false;
   mMediumType = WbDataPacket::UNKNOWN;
   mByteRate = -1.0;
 }
@@ -60,6 +63,7 @@ void WbEmitter::preFinalize() {
   WbSolidDevice::preFinalize();
 
   updateTransmissionSetup();
+  updateAllowedChannels();
 }
 
 void WbEmitter::postFinalize() {
@@ -73,6 +77,7 @@ void WbEmitter::postFinalize() {
   connect(mBaudRate, &WbSFInt::changed, this, &WbEmitter::updateTransmissionSetup);
   connect(mByteSize, &WbSFInt::changed, this, &WbEmitter::updateTransmissionSetup);
   connect(mBufferSize, &WbSFInt::changed, this, &WbEmitter::updateBufferSize);
+  connect(mAllowedChannels, &WbMFInt::changed, this, &WbEmitter::updateAllowedChannels);
 }
 
 void WbEmitter::updateTransmissionSetup() {
@@ -105,11 +110,39 @@ void WbEmitter::updateRange() {
   mNeedToSetRange = true;
 }
 
+bool WbEmitter::isChannelAllowed() {
+  const int allowedChannelsSize = mAllowedChannels->size();
+  if (allowedChannelsSize > 0) {
+    const int currentChannel = (int)mChannel->value();
+    for (int i = 0; i < allowedChannelsSize; i++) {
+      if (currentChannel == mAllowedChannels->item(i))
+        return true;
+    }
+    return false;
+  }
+  return true;
+}
+
+void WbEmitter::updateAllowedChannels() {
+  if (!isChannelAllowed()) {
+    parsingWarn(
+      tr("'allowedChannels' does not contain current 'channel'. Setting 'channel' to %1.").arg(mAllowedChannels->item(0)));
+    mChannel->setValue(mAllowedChannels->item(0));
+  }
+
+  mNeedToSetAllowedChannels = true;
+}
+
 void WbEmitter::updateChannel() {
+  if (!isChannelAllowed()) {
+    parsingWarn(tr("'channel' is not included in 'allowedChannels'. Setting 'channel' to %1").arg(mAllowedChannels->item(0)));
+    mChannel->setValue(mAllowedChannels->item(0));
+  }
+
   mNeedToSetChannel = true;
 }
 
-void WbEmitter::writeConfigure(QDataStream &stream) {
+void WbEmitter::writeConfigure(WbDataStream &stream) {
   stream << tag();
   stream << (unsigned char)C_CONFIGURE;
   stream << (int)mBufferSize->value();
@@ -117,13 +150,17 @@ void WbEmitter::writeConfigure(QDataStream &stream) {
   stream << (double)mByteRate;
   stream << (double)mRange->value();
   stream << (double)mMaxRange->value();
+  stream << (int)mAllowedChannels->size();
+  for (int i = 0; i < mAllowedChannels->size(); i++)
+    stream << (int)mAllowedChannels->item(i);
 
   mNeedToSetRange = false;
   mNeedToSetChannel = false;
   mNeedToSetBufferSize = false;
+  mNeedToSetAllowedChannels = false;
 }
 
-void WbEmitter::writeAnswer(QDataStream &stream) {
+void WbEmitter::writeAnswer(WbDataStream &stream) {
   if (mNeedToSetRange) {
     stream << tag();
     stream << (unsigned char)C_EMITTER_SET_RANGE;
@@ -142,22 +179,29 @@ void WbEmitter::writeAnswer(QDataStream &stream) {
     stream << (int)mBufferSize->value();
     mNeedToSetBufferSize = false;
   }
+  if (mNeedToSetAllowedChannels) {
+    stream << tag();
+    stream << (unsigned char)C_EMITTER_SET_ALLOWED_CHANNELS;
+    stream << (int)mAllowedChannels->size();
+    for (int i = 0; i < mAllowedChannels->size(); i++)
+      stream << (int)mAllowedChannels->item(i);
+  }
 }
 
 void WbEmitter::handleMessage(QDataStream &stream) {
   unsigned char command;
   unsigned int size;
-  int channel;
-  double range;
+  int newChannel;
+  double newRange;
   char *data;
 
   stream >> command;
   switch (command) {
     case C_EMITTER_SEND:
-      stream >> channel;
-      mChannel->setValue(channel);
-      stream >> range;
-      mRange->setValue(range);
+      stream >> newChannel;
+      mChannel->setValue(newChannel);
+      stream >> newRange;
+      mRange->setValue(newRange);
       stream >> size;
       data = new char[size];
       stream.readRawData(data, size);
@@ -166,13 +210,13 @@ void WbEmitter::handleMessage(QDataStream &stream) {
       return;
 
     case C_EMITTER_SET_CHANNEL:
-      stream >> channel;
-      mChannel->setValue(channel);
+      stream >> newChannel;
+      mChannel->setValue(newChannel);
       return;
 
     case C_EMITTER_SET_RANGE:
-      stream >> range;
-      mRange->setValue(range);
+      stream >> newRange;
+      mRange->setValue(newRange);
       return;
 
     default:

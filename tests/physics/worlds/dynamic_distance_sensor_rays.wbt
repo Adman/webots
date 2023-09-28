@@ -1,4 +1,8 @@
-#VRML_SIM R2021b utf8
+#VRML_SIM R2023b utf8
+
+EXTERNPROTO "webots://tests/default/protos/TestSuiteEmitter.proto"
+EXTERNPROTO "webots://tests/default/protos/TestSuiteSupervisor.proto"
+
 WorldInfo {
   title "Dynamic distance sensor rays"
 }
@@ -16,7 +20,6 @@ PointLight {
   location 0 0 0.3
 }
 Solid {
-  rotation 1 0 0 1.5707996938995747
   children [
     Shape {
       appearance PBRAppearance {
@@ -80,15 +83,15 @@ DEF DYNAMIC_ROBOT Robot {
         translation 0 0.045 -0.03
         rotation 0 0 1 -1.5708
         children [
-          DEF WHEEL Transform {
-            rotation 0 0 1 1.57
+          DEF WHEEL Pose {
+            rotation 0.57766 0.57720 -0.57720 -2.09394
             children [
               Shape {
                 appearance PBRAppearance {
                   baseColor 0 0.212802 0.869993
                   baseColorMap ImageTexture {
                     url [
-                      "textures/plastic.jpg"
+                      "webots://projects/default/worlds/textures/plastic.jpg"
                     ]
                   }
                 }
@@ -123,15 +126,15 @@ DEF DYNAMIC_ROBOT Robot {
         translation 0 -0.045 -0.03
         rotation 0 0 1 -1.5708
         children [
-          DEF WHEEL Transform {
-            rotation 0 0 1 1.57
+          DEF WHEEL Pose {
+            rotation 0.57766 0.57720 -0.57720 -2.09394
             children [
               Shape {
                 appearance PBRAppearance {
                   baseColor 0 0.212802 0.869993
                   baseColorMap ImageTexture {
                     url [
-                      "textures/plastic.jpg"
+                      "webots://projects/default/worlds/textures/plastic.jpg"
                     ]
                   }
                 }
@@ -196,7 +199,7 @@ DEF DYNAMIC_ROBOT Robot {
     }
   ]
   name "dynamic"
-  boundingObject Transform {
+  boundingObject Pose {
     translation 0 0 -0.03
     children [
       Sphere {

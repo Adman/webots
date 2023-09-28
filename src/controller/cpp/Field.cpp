@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -53,8 +53,20 @@ Field::Type Field::getType() const {
   return Type(wb_supervisor_field_get_type(fieldRef));
 }
 
+void Field::enableSFTracking(int samplingPeriod) {
+  wb_supervisor_field_enable_sf_tracking(fieldRef, samplingPeriod);
+}
+
+void Field::disableSFTracking() {
+  wb_supervisor_field_disable_sf_tracking(fieldRef);
+}
+
 std::string Field::getTypeName() const {
   return string(wb_supervisor_field_get_type_name(fieldRef));
+}
+
+std::string Field::getName() const {
+  return string(wb_supervisor_field_get_name(fieldRef));
 }
 
 int Field::getCount() const {
@@ -238,24 +250,10 @@ void Field::removeSF() {
   wb_supervisor_field_remove_sf(fieldRef);
 }
 
-void Field::importMFNode(int position, const std::string &filename) {
-  wb_supervisor_field_import_mf_node(fieldRef, position, filename.c_str());
-}
-
 void Field::importMFNodeFromString(int position, const std::string &nodeString) {
   wb_supervisor_field_import_mf_node_from_string(fieldRef, position, nodeString.c_str());
 }
 
-void Field::importSFNode(const std::string &filename) {
-  wb_supervisor_field_import_sf_node(fieldRef, filename.c_str());
-}
-
 void Field::importSFNodeFromString(const std::string &nodeString) {
   wb_supervisor_field_import_sf_node_from_string(fieldRef, nodeString.c_str());
-}
-
-void Field::removeMFNode(int position) {
-  fprintf(stderr, "Field::removeMFNode is deprecated, please use "
-                  "Field::removeMF instead\n");
-  wb_supervisor_field_remove_mf(fieldRef, position);
 }

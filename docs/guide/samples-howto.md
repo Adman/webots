@@ -1,7 +1,7 @@
-## How To
+## How to
 
 This section gives various examples of complex behaviors and/or functionalities.
-The world files are located in the "[WEBOTS\_HOME/projects/samples/howto/worlds]({{ url.github_tree }}/projects/samples/howto/worlds/)" directory, and their controllers in the "[WEBOTS\_HOME/projects/samples/howto/controllers]({{ url.github_tree }}/projects/samples/howto/controllers/)" directory.
+The examples are located in "[WEBOTS\_HOME/projects/samples/howto/]({{ url.github_tree }}/projects/samples/howto/)". Each example has its own controllers and worlds directories.
 For each, the world file and its corresponding controller are named according to the behavior they exemplify.
 
 ### [asymmetric\_friction1.wbt]({{ url.github_tree }}/projects/samples/howto/asymmetric_friction/worlds/asymmetric_friction1.wbt)
@@ -46,11 +46,18 @@ The inertia of the heavy mass lets the robot base turn round.
 The overall center of mass of the robot is changing.
 This can be visualized with the `View / Optional Rendering / Show Center of Mass...` or `mass` tab of in the node editor when the robot is selected.
 
+### [console.wbt]({{ url.github_tree }}/projects/samples/howto/console/worlds/console.wbt)
+
+**Keywords**: Console
+
+![console.png](images/samples/console.png) In this example is shown how to customize the formatting of the text in the [console](controller-programming.md#console-output).
+It allows to change the color, modify the style and clear the console.
+
 ### [custom\_robot\_window\_simple.wbt]({{ url.github_tree }}/projects/samples/howto/custom_robot_window_simple/worlds/custom_robot_window_simple.wbt)
 
 **Keywords**: custom robot window, [controller plugin](controller-plugin.md), HTML, JavaScript
 
-![custom_robot_window_simple.png](images/samples/custom_robot_window_simple.thumbnail.jpg) This example shows a minimal two way communication between a simple robot window and a robot controller.
+![custom_robot_window_simple.png](images/samples/custom_robot_window_simple.png) This example shows a minimal two way communication between a simple robot window and a robot controller.
 The JavaScript and Python files deal with the interactions between the page and the robot, using the WWI API to exchange string messages.
 
 
@@ -89,7 +96,7 @@ In addition, there is an equivalent version of a MATLAB controller `force_contro
 In the first layout, the four motorized wheels are positioned circularly, as could be done for omnidirectional-wheeled robots.
 In the second layout, the four motorized wheels are oriented in the same direction, as could be done for a robot with tracks.
 In the third layout, a simple [Ackermann steering geometry](https://en.wikipedia.org/wiki/Ackermann_steering_geometry) is shown.
-Note that more completed Ackermann steering geometry can be achieved using the [`AckermannVehicle` PROTO](../automobile/ackermannvehicle.md), and the [`car` library](../automobile/car-library.md).
+Note that more completed Ackermann steering geometry can be achieved using the [AckermannVehicle](https://webots.cloud/run?url={{ url.github_tree }}/projects/vehicles/protos/abstract/AckermannVehicle.proto) PROTO, and the [`car` library](../automobile/car-library.md).
 
 ### [gears.wbt]({{ url.github_tree }}/projects/samples/howto/gears/worlds/gears.wbt)
 
@@ -128,7 +135,7 @@ Faster omnidirectional wheels implementations could be achieved using asymmetric
 
 **Keywords**: Reinforcement learning, OpenAI Gym
 
-![openai_gym.png](images/samples/openai_gym.thumbnail.jpg) This example shows an integration of [OpenAI Gym](https://gym.openai.com/) with Webots.
+![openai_gym.png](images/samples/openai_gym.png) This example shows an integration of [OpenAI Gym](https://gym.openai.com/) with Webots.
 In this example, the robot tries to keep an inverted pendulum up as long as possible.
 The OpenAI Gym interface is utilized by [Stable Baselines3](https://github.com/DLR-RM/stable-baselines3) to train the robot to keep the inverted pendulum up.
 
@@ -160,6 +167,17 @@ This plugins is an example of:
 - How to move objects.
 - How to handle collisions.
 
+### [rolling\_friction.wbt]({{ url.github_tree }}/projects/samples/howto/rope/worlds/rolling_friction.wbt)
+
+**Keywords**: [ContactProperties](../reference/contactproperties.md), rolling friction
+
+![rolling_friction.png](images/samples/rolling_friction.thumbnail.jpg) In this example is demonstrated the principle of rolling friction.
+The physics engine (ODE) supports up to three coefficients, commonly referred to as rho, rho2, and rhoN.
+The black marbles are free to roll, however they are subject to different values of rho and therefore some take longer than others to accelerate.
+The green marbles are also free to roll, but are given an initial lateral velocity.
+The resulting lateral movement is limited to varying degrees due to having different values of rho2.
+Lastly, the blue marbles are initially spun around the Z axis and they come to a halt at different moments because they have different values of rhoN.
+
 ### [rope.wbt]({{ url.github_tree }}/projects/samples/howto/rope/worlds/rope.wbt)
 
 **Keywords**: [BallJoint](../reference/balljoint.md), rope
@@ -187,7 +205,7 @@ To apply a torque on the spinner, use the <kbd>alt</kbd> + mouse right click seq
 **Keywords**: [Supervisor](../reference/supervisor.md), [IndexedLineSet](../reference/indexedlineset.md), draw trail
 
 ![supervisor_draw_trail.png](images/samples/supervisor_draw_trail.thumbnail.jpg) In this example, a [Supervisor](../reference/supervisor.md) controller draws a green path behind a target node.
-The target node is a [Transform](../reference/transform.md) node mounted in the `turretSlot` of a moving e-puck robot.
+The target node is a [Pose](../reference/pose.md) node mounted in the `turretSlot` of a moving e-puck robot.
 At the beginning of the simulation, the [Supervisor](../reference/supervisor.md) controller creates programmatically an `IndexedLineSet` node.
 Then at each simulation step, it uses the target node position to update the `IndexedLineSet` node fields.
 

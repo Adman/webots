@@ -1,36 +1,40 @@
-#VRML_SIM R2021b utf8
+#VRML_SIM R2023b utf8
 # license: Copyright Cyberbotics Ltd. Licensed for use only with Webots.
 # license url: https://cyberbotics.com/webots_assets_license
-# tags: static
+# documentation url: https://webots.cloud/run?url=https://github.com/cyberbotics/webots/blob/released/projects/robots/kinematics/tinkerbots/protos/TinkerbotsAxle.proto
+# keywords: robot/extension
 # Tinkerbots axle.
-# https://www.tinkerbots.com
+# More information on: [TinkerbotsBase](https://webots.cloud/run?url=https://github.com/cyberbotics/webots/blob/released/projects/robots/kinematics/tinkerbots/protos/TinkerbotsBase.proto)
+# template language: javascript
+
+EXTERNPROTO "TinkerbotsPlasticAppearance.proto"
 
 PROTO TinkerbotsAxle [
-  field SFVec3f                  translation 0 0 0    # Is `Transform.translation`.
-  field SFRotation               rotation    0 0 1 0  # Is `Transform.rotation`.
+  field SFVec3f                  translation 0 0 0    # Is `Pose.translation`.
+  field SFRotation               rotation    0 0 1 0  # Is `Pose.rotation`.
   field SFString                 name        "axle"   # Is `Solid.name`.
   field SFNode                   endSlot     NULL     # Slot at the opposite side of the axle. Type: "lego cross+".
   field SFString{"2.2cm", "7cm"} length      "2.2cm"  # Defines the length of the axle in centimeters.
 ]
 {
-  %{
-    local l = 0.022
-    if fields.length.value == "7cm" then
-      l = 0.07
-    end
+  %<
+    let l = 0.022;
+    if (fields.length.value === "7cm")
+      l = 0.07;
 
-    -- cross coordinates
-    local a = 0.00075
-    local b = 0.00225
-  }%
+    // cross coordinates
+    const a = 0.00075;
+    const b = 0.00225;
+  >%
   Slot {
     type "lego cross+"
     endPoint Solid {
       translation IS translation
       rotation IS rotation
       children [
-        Transform {
-          translation 0 0 %{=l}%
+        Pose {
+          translation 0 0 %<= l >%
+          rotation 1 0 0 -1.5708
           children [
             Slot {
               type "lego cross+"
@@ -45,31 +49,31 @@ PROTO TinkerbotsAxle [
           geometry IndexedFaceSet {
             coord Coordinate {
               point [
-                %{=a}% %{=b}% 0
-                %{=a}% %{=a}% 0
-                %{=b}% %{=a}% 0
-                %{=b}% %{=-a}% 0
-                %{=a}% %{=-a}% 0
-                %{=a}% %{=-b}% 0
-                %{=-a}% %{=-b}% 0
-                %{=-a}% %{=-a}% 0
-                %{=-b}% %{=-a}% 0
-                %{=-b}% %{=a}% 0
-                %{=-a}% %{=a}% 0
-                %{=-a}% %{=b}% 0
+                %<= a >% %<= b >% 0
+                %<= a >% %<= a >% 0
+                %<= b >% %<= a >% 0
+                %<= b >% %<= -a >% 0
+                %<= a >% %<= -a >% 0
+                %<= a >% %<= -b >% 0
+                %<= -a >% %<= -b >% 0
+                %<= -a >% %<= -a >% 0
+                %<= -b >% %<= -a >% 0
+                %<= -b >% %<= a >% 0
+                %<= -a >% %<= a >% 0
+                %<= -a >% %<= b >% 0
 
-                %{=a}% %{=b}% %{=l}%
-                %{=a}% %{=a}% %{=l}%
-                %{=b}% %{=a}% %{=l}%
-                %{=b}% %{=-a}% %{=l}%
-                %{=a}% %{=-a}% %{=l}%
-                %{=a}% %{=-b}% %{=l}%
-                %{=-a}% %{=-b}% %{=l}%
-                %{=-a}% %{=-a}% %{=l}%
-                %{=-b}% %{=-a}% %{=l}%
-                %{=-b}% %{=a}% %{=l}%
-                %{=-a}% %{=a}% %{=l}%
-                %{=-a}% %{=b}% %{=l}%
+                %<= a >% %<= b >% %<= l >%
+                %<= a >% %<= a >% %<= l >%
+                %<= b >% %<= a >% %<= l >%
+                %<= b >% %<= -a >% %<= l >%
+                %<= a >% %<= -a >% %<= l >%
+                %<= a >% %<= -b >% %<= l >%
+                %<= -a >% %<= -b >% %<= l >%
+                %<= -a >% %<= -a >% %<= l >%
+                %<= -b >% %<= -a >% %<= l >%
+                %<= -b >% %<= a >% %<= l >%
+                %<= -a >% %<= a >% %<= l >%
+                %<= -a >% %<= b >% %<= l >%
               ]
             }
             coordIndex [
@@ -101,11 +105,11 @@ PROTO TinkerbotsAxle [
       ]
       name IS name
       contactMaterial "tinkerbots axle"
-      boundingObject Transform {
-        translation 0 0 %{= 0.5 * l }%
+      boundingObject Pose {
+        translation 0 0 %<= 0.5 * l >%
         children [
           Box {
-            size %{= 2.0 * b }% %{= 2.0 * b }% %{=l}%
+            size %<= 2.0 * b >% %<= 2.0 * b >% %<= l >%
           }
         ]
       }

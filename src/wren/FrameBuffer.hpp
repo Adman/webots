@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -51,8 +51,10 @@ namespace wren {
     // Encapsulate memory management
     static FrameBuffer *createFrameBuffer() { return new FrameBuffer(); }
     static void deleteFrameBuffer(FrameBuffer *frameBuffer);
+    static void swapTexture(TextureRtt *texture);
 
     void appendOutputTexture(TextureRtt *texture);
+    void appendOutputTextureDisable(TextureRtt *texture);
     void appendOutputRenderBuffer(WrTextureInternalFormat format);
     void setDepthTexture(TextureRtt *texture) { mDepthTexture = texture; }
     void enableDepthBuffer(bool enable) { mIsDepthBufferEnabled = enable; }

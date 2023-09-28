@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,10 @@
 #define WB_HINGE_2_JOINT_HPP
 
 #include "WbHingeJoint.hpp"
+
+#include <QtCore/QMap>
+
+class QString;
 
 class WbHinge2Joint : public WbHingeJoint {
   Q_OBJECT
@@ -51,6 +55,7 @@ public:
   WbBrake *brake2() const;
   WbJointDevice *device2(int index) const;
   virtual int devices2Number() const;
+  void updateEndPointZeroTranslationAndRotation() override;
 
 public slots:
   bool setJoint() override;
@@ -68,10 +73,9 @@ protected:
   QMap<QString, double> mSavedPositions2;
   void updatePosition(double position) override;
   void updatePositions(double position, double position2);
-  void updateEndPointZeroTranslationAndRotation() override;
   void applyToOdeSpringAndDampingConstants(dBodyID body, dBodyID parentBody) override;
   void updateOdePositionOffset() override;
-  void writeExport(WbVrmlWriter &writer) const override;
+  void writeExport(WbWriter &writer) const override;
 
 protected slots:
   virtual void addDevice2(int index);

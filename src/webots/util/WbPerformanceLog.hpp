@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,6 +23,7 @@
 //
 
 #include <QtCore/QFile>
+#include <QtCore/QHash>
 #include <QtCore/QString>
 #include <QtCore/QTextStream>
 #include <QtCore/QVector>
@@ -34,7 +35,8 @@ class Measurement;
 class WbPerformanceLog {
 public:
   enum InfoType {
-    PRE_PHYSICS_STEP = 0,
+    LOADING = 0,
+    PRE_PHYSICS_STEP,
     PHYSICS_STEP,
     POST_PHYSICS_STEP,
     MAIN_RENDERING,
@@ -44,6 +46,7 @@ public:
     DEVICE_RENDERING,
     DEVICE_WINDOW_RENDERING,
     CONTROLLER,
+    SPEED_FACTOR,
     INFO_COUNT
   };
 
@@ -59,7 +62,7 @@ public:
   void stopMeasure(InfoType type, const QString &object = QString());
   void startControllerMeasure(const QString &controllerName);
   void stopControllerMeasure(const QString &controllerName);
-
+  void setTimeStep(double value) { mTimeStep = value; }
   void setAvgFPS(double value) { mAverageFPS = value; }
 
   void reportStepRenderingStats(int trianglesCount);
@@ -84,6 +87,7 @@ private:
   QVector<QElapsedTimer *> mTimers;
   QTextStream mOutStream;
   double mAverageFPS;
+  double mTimeStep;
   bool mIsLogCompleted;
 
   QHash<QString, Measurement *> mRenderingDevicesValues;

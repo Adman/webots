@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,6 +22,7 @@
 #include <webots/Robot.hpp>
 
 #include <webots/Accelerometer.hpp>
+#include <webots/Altimeter.hpp>
 #include <webots/Brake.hpp>
 #include <webots/Camera.hpp>
 #include <webots/Compass.hpp>
@@ -48,6 +49,7 @@
 #include <webots/Skin.hpp>
 #include <webots/Speaker.hpp>
 #include <webots/TouchSensor.hpp>
+#include <webots/VacuumGripper.hpp>
 
 #include <cassert>
 #include <cstdlib>
@@ -86,6 +88,14 @@ Robot::~Robot() {
 
 int Robot::step(int duration) {
   return wb_robot_step(duration);
+}
+
+int Robot::stepBegin(int duration) {
+  return wb_robot_step_begin(duration);
+}
+
+int Robot::stepEnd() {
+  return wb_robot_step_end();
 }
 
 Robot::UserInputEvent Robot::waitForUserInputEvent(UserInputEvent event_type, int timeout) {
@@ -166,10 +176,6 @@ Device *Robot::getDevice(const std::string &name) {
   return getOrCreateDevice(wb_robot_get_device(name.c_str()));
 }
 
-int Robot::getType() const {
-  return wb_robot_get_type();
-}
-
 void Robot::batterySensorEnable(int sampling_period) {
   wb_robot_battery_sensor_enable(sampling_period);
 }
@@ -195,6 +201,17 @@ Accelerometer *Robot::getAccelerometer(const string &name) {
 
 Accelerometer *Robot::createAccelerometer(const string &name) const {
   return new Accelerometer(name);
+}
+
+Altimeter *Robot::getAltimeter(const string &name) {
+  WbDeviceTag tag = wb_robot_get_device(name.c_str());
+  if (!Device::hasType(tag, WB_NODE_ALTIMETER))
+    return NULL;
+  return dynamic_cast<Altimeter *>(getOrCreateDevice(tag));
+}
+
+Altimeter *Robot::createAltimeter(const string &name) const {
+  return new Altimeter(name);
 }
 
 Brake *Robot::getBrake(const string &name) {
@@ -439,6 +456,17 @@ TouchSensor *Robot::createTouchSensor(const string &name) const {
   return new TouchSensor(name);
 }
 
+VacuumGripper *Robot::getVacuumGripper(const string &name) {
+  WbDeviceTag tag = wb_robot_get_device(name.c_str());
+  if (!Device::hasType(tag, WB_NODE_VACUUM_GRIPPER))
+    return NULL;
+  return dynamic_cast<VacuumGripper *>(getOrCreateDevice(tag));
+}
+
+VacuumGripper *Robot::createVacuumGripper(const string &name) const {
+  return new VacuumGripper(name);
+}
+
 Device *Robot::getDeviceFromTag(int tag) {
   if (tag == 0)
     return NULL;
@@ -457,7 +485,7 @@ Device *Robot::getOrCreateDevice(int tag) {
   const int size = (int)deviceList.size();
   // if new devices have been added, then count is greater than devices.length
   // deleted devices are not removed from the C API list and don't affect the number of devices
-  if (size == count && size > 0 && tag < size)
+  if (size == count + 1 && size > 0 && tag < size)
     return deviceList[tag];
 
   // (re-)initialize deviceList
@@ -472,6 +500,9 @@ Device *Robot::getOrCreateDevice(int tag) {
     switch (wb_device_get_node_type(otherTag)) {
       case WB_NODE_ACCELEROMETER:
         deviceList[otherTag] = createAccelerometer(name);
+        break;
+      case WB_NODE_ALTIMETER:
+        deviceList[otherTag] = createAltimeter(name);
         break;
       case WB_NODE_BRAKE:
         deviceList[otherTag] = createBrake(name);
@@ -540,6 +571,9 @@ Device *Robot::getOrCreateDevice(int tag) {
       case WB_NODE_TOUCH_SENSOR:
         deviceList[otherTag] = createTouchSensor(name);
         break;
+      case WB_NODE_VACUUM_GRIPPER:
+        deviceList[otherTag] = createVacuumGripper(name);
+        break;
       default:
         deviceList[otherTag] = NULL;
         break;
@@ -577,7 +611,7 @@ const char *Robot::wwiReceive(int *size) {
 }
 
 string Robot::wwiReceiveText() {
-  const char *text = wb_robot_wwi_receive(NULL);
+  const char *text = wb_robot_wwi_receive_text();
   if (text)
     return string(text);
   else

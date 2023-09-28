@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -119,10 +119,7 @@ void WbDragRotateAroundAxisSolidEvent::apply(const QPoint &currentMousePosition)
 WbDragPhysicsEvent::WbDragPhysicsEvent(const QSize &widgetSize, WbViewpoint *viewpoint, WbSolid *selectedSolid) :
   WbDragView3DEvent(viewpoint),
   mSelectedSolid(selectedSolid),
-  mVector(),
-  mMouseRay(),
   mIsLocked(false),
-  mMagnitude(0.0),
   mWidgetSize(widgetSize),
   mViewDistanceScaling(1.0f) {
   // init label
@@ -211,8 +208,6 @@ void WbDragPhysicsEvent::updateRenderingAndPhysics() {
 // Add a force by dragging the mouse  //
 ////////////////////////////////////////
 
-const double WbDragForceEvent::FORCE_SCALING_FACTOR = 30.0;
-
 // WbDragForceEvent functions
 
 WbDragForceEvent::WbDragForceEvent(const QSize &widgetSize, WbViewpoint *viewpoint, WbSolid *selectedSolid) :
@@ -220,11 +215,9 @@ WbDragForceEvent::WbDragForceEvent(const QSize &widgetSize, WbViewpoint *viewpoi
   mRepresentation = new WbForceRepresentation();
   mOrigin = viewpoint->rotationCenter();
   mRelativeOrigin = selectedSolid->matrix().pseudoInversed(mOrigin);
-  double s = selectedSolid->absoluteScale().x();
-  s *= s;
-  mRelativeOrigin /= s;
   mEnd = mOrigin;
   mDragPlane = WbAffinePlane(viewpoint->orientation()->value().direction(), mOrigin);
+  mScalingFactor = WbWorld::instance()->worldInfo()->dragForceScale() * selectedSolid->mass();
   init();
   mRepresentation->setScale(mViewDistanceScaling);
 }
@@ -235,25 +228,17 @@ void WbDragForceEvent::updateOrigin() {
 }
 
 void WbDragForceEvent::applyToOde() {
-  mScalingFactor = FORCE_SCALING_FACTOR * mVector.length2();
   // ODE
   mSelectedSolid->awake();
-  mSelectedSolid->addForceAtPosition(mScalingFactor * mVector, mOrigin);
+  mSelectedSolid->addForceAtPosition(mScalingFactor * mVector.length2() * mVector, mOrigin);
 }
 
-QString WbDragForceEvent::magnitudeString() {
-  const double lengthSquared = mVector.length2();
-  mScalingFactor = FORCE_SCALING_FACTOR * lengthSquared;
-  mMagnitude = mScalingFactor * sqrt(lengthSquared);
-  QString returnValue = WbPrecision::doubleToString(mMagnitude, WbPrecision::GUI_MEDIUM) + " N";
-  mMagnitude = mScalingFactor * mVector.length();
-  return returnValue;
+QString WbDragForceEvent::magnitudeString() const {
+  return WbPrecision::doubleToString(mScalingFactor * mVector.length2() * mVector.length(), WbPrecision::GUI_MEDIUM) + " N";
 }
 
 // Add a torque by dragging the mouse  //
 /////////////////////////////////////////
-
-const double WbDragTorqueEvent::TORQUE_SCALING_FACTOR = 5.0;
 
 // WbDragTorqueEvent functions
 
@@ -264,7 +249,7 @@ WbDragTorqueEvent::WbDragTorqueEvent(const QSize &widgetSize, WbViewpoint *viewp
   mOrigin = mSelectedSolid->matrix() * mSolidMerger->centerOfMass();
   mEnd = mOrigin;
   mDragPlane = WbAffinePlane(viewpoint->orientation()->value().direction(), mOrigin);
-  mScalingFactor = TORQUE_SCALING_FACTOR * selectedSolid->mass();
+  mScalingFactor = WbWorld::instance()->worldInfo()->dragTorqueScale() * selectedSolid->mass();
   init();
   mRepresentation->setScale(mViewDistanceScaling);
 }
@@ -277,10 +262,9 @@ void WbDragTorqueEvent::updateOrigin() {
 void WbDragTorqueEvent::applyToOde() {
   // ODE
   mSelectedSolid->awake();
-  mSelectedSolid->addTorque(mScalingFactor * mVector);
+  mSelectedSolid->addTorque(mScalingFactor * mVector.length2() * mVector);
 }
 
-QString WbDragTorqueEvent::magnitudeString() {
-  mMagnitude = mScalingFactor * mVector.length();
-  return WbPrecision::doubleToString(mMagnitude, WbPrecision::GUI_MEDIUM) + " Nm";
+QString WbDragTorqueEvent::magnitudeString() const {
+  return WbPrecision::doubleToString(mScalingFactor * mVector.length2() * mVector.length(), WbPrecision::GUI_MEDIUM) + " Nm";
 }

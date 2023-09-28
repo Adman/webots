@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,12 +15,15 @@
 #include "WbConcreteNodeFactory.hpp"
 
 #include "WbAccelerometer.hpp"
+#include "WbAltimeter.hpp"
 #include "WbAppearance.hpp"
 #include "WbBackground.hpp"
 #include "WbBallJoint.hpp"
 #include "WbBallJointParameters.hpp"
+#include "WbBillboard.hpp"
 #include "WbBox.hpp"
 #include "WbBrake.hpp"
+#include "WbCadShape.hpp"
 #include "WbCamera.hpp"
 #include "WbCapsule.hpp"
 #include "WbCharger.hpp"
@@ -70,9 +73,10 @@
 #include "WbPlane.hpp"
 #include "WbPointLight.hpp"
 #include "WbPointSet.hpp"
+#include "WbPose.hpp"
 #include "WbPositionSensor.hpp"
 #include "WbPropeller.hpp"
-#include "WbProtoList.hpp"
+#include "WbProtoManager.hpp"
 #include "WbProtoModel.hpp"
 #include "WbRadar.hpp"
 #include "WbRadio.hpp"
@@ -93,11 +97,15 @@
 #include "WbTemplateManager.hpp"
 #include "WbTextureCoordinate.hpp"
 #include "WbTextureTransform.hpp"
+#include "WbTokenizer.hpp"
 #include "WbTouchSensor.hpp"
 #include "WbTrack.hpp"
 #include "WbTrackWheel.hpp"
 #include "WbTransform.hpp"
+#include "WbUrl.hpp"
+#include "WbVacuumGripper.hpp"
 #include "WbViewpoint.hpp"
+#include "WbVrmlNodeUtilities.hpp"
 #include "WbWorld.hpp"
 #include "WbWorldInfo.hpp"
 #include "WbZoom.hpp"
@@ -108,9 +116,11 @@
 WbConcreteNodeFactory WbConcreteNodeFactory::gFactory;
 
 WbNode *WbConcreteNodeFactory::createNode(const QString &modelName, WbTokenizer *tokenizer, WbNode *parentNode,
-                                          const QString *protoFilePath) {
+                                          const QString *protoUrl) {
   if (modelName == "Accelerometer")
     return new WbAccelerometer(tokenizer);
+  if (modelName == "Altimeter")
+    return new WbAltimeter(tokenizer);
   if (modelName == "Appearance")
     return new WbAppearance(tokenizer);
   if (modelName == "Background")
@@ -119,6 +129,8 @@ WbNode *WbConcreteNodeFactory::createNode(const QString &modelName, WbTokenizer 
     return new WbBallJoint(tokenizer);
   if (modelName == "BallJointParameters")
     return new WbBallJointParameters(tokenizer);
+  if (modelName == "Billboard")
+    return new WbBillboard(tokenizer);
   if (modelName == "Box")
     return new WbBox(tokenizer);
   if (modelName == "Brake")
@@ -129,6 +141,8 @@ WbNode *WbConcreteNodeFactory::createNode(const QString &modelName, WbTokenizer 
     return new WbCapsule(tokenizer);
   if (modelName == "Charger")
     return new WbCharger(tokenizer);
+  if (modelName == "CadShape")
+    return new WbCadShape(tokenizer);
   if (modelName == "Color")
     return new WbColor(tokenizer);
   if (modelName == "Compass")
@@ -223,6 +237,8 @@ WbNode *WbConcreteNodeFactory::createNode(const QString &modelName, WbTokenizer 
     return new WbPointSet(tokenizer);
   if (modelName == "PositionSensor")
     return new WbPositionSensor(tokenizer);
+  if (modelName == "Pose")
+    return new WbPose(tokenizer);
   if (modelName == "Propeller")
     return new WbPropeller(tokenizer);
   if (modelName == "Radar")
@@ -267,8 +283,14 @@ WbNode *WbConcreteNodeFactory::createNode(const QString &modelName, WbTokenizer 
     return new WbTrack(tokenizer);
   if (modelName == "TrackWheel")
     return new WbTrackWheel(tokenizer);
-  if (modelName == "Transform")
+  if (modelName == "Transform") {
+    if (WbWorld::instance() && WbWorld::instance()->isLoading())
+      return WbVrmlNodeUtilities::transformBackwardCompatibility(tokenizer) ? new WbPose(tokenizer) :
+                                                                              new WbTransform(tokenizer);
     return new WbTransform(tokenizer);
+  }
+  if (modelName == "VacuumGripper")
+    return new WbVacuumGripper(tokenizer);
   if (modelName == "Viewpoint")
     return new WbViewpoint(tokenizer);
   if (modelName == "WorldInfo")
@@ -277,10 +299,16 @@ WbNode *WbConcreteNodeFactory::createNode(const QString &modelName, WbTokenizer 
     return new WbZoom(tokenizer);
 
   // look for PROTOs
-  WbProtoModel *const model =
-    protoFilePath ?
-      WbProtoList::current()->readModel(*protoFilePath, WbWorld::instance() ? WbWorld::instance()->fileName() : "") :
-      WbProtoList::current()->findModel(modelName, WbWorld::instance() ? WbWorld::instance()->fileName() : "");
+  WbProtoModel *model;
+  const QString &worldPath = WbWorld::instance() ? WbWorld::instance()->fileName() : "";
+  if (protoUrl) {
+    const QString prefix = WbUrl::computePrefix(*protoUrl);
+    model = WbProtoManager::instance()->readModel(*protoUrl, worldPath, prefix);
+  } else {
+    const QString &parentFilePath = tokenizer->fileName().isEmpty() ? tokenizer->referralFile() : tokenizer->fileName();
+    model = WbProtoManager::instance()->findModel(modelName, worldPath, parentFilePath);
+  }
+
   if (!model)
     return NULL;
 
@@ -290,7 +318,10 @@ WbNode *WbConcreteNodeFactory::createNode(const QString &modelName, WbTokenizer 
   WbNode *protoInstance =
     WbNode::createProtoInstance(model, tokenizer, WbWorld::instance() ? WbWorld::instance()->fileName() : "");
   if (protoInstance)
-    WbTemplateManager::instance()->subscribe(protoInstance);
+    WbTemplateManager::instance()->subscribe(protoInstance, false);
+
+  WbNodeUtilities::fixBackwardCompatibility(protoInstance);
+
   return protoInstance;
 }
 
@@ -299,6 +330,8 @@ WbNode *WbConcreteNodeFactory::createCopy(const WbNode &original) {
 
   if (modelName == "Accelerometer")
     return new WbAccelerometer(original);
+  if (modelName == "Altimeter")
+    return new WbAltimeter(original);
   if (modelName == "Appearance")
     return new WbAppearance(original);
   if (modelName == "Background")
@@ -307,10 +340,14 @@ WbNode *WbConcreteNodeFactory::createCopy(const WbNode &original) {
     return new WbBallJoint(original);
   if (modelName == "BallJointParameters")
     return new WbBallJointParameters(original);
+  if (modelName == "Billboard")
+    return new WbBillboard(original);
   if (modelName == "Box")
     return new WbBox(original);
   if (modelName == "Brake")
     return new WbBrake(original);
+  if (modelName == "CadShape")
+    return new WbCadShape(original);
   if (modelName == "Camera")
     return new WbCamera(original);
   if (modelName == "Capsule")
@@ -411,6 +448,8 @@ WbNode *WbConcreteNodeFactory::createCopy(const WbNode &original) {
     return new WbPointSet(original);
   if (modelName == "PositionSensor")
     return new WbPositionSensor(original);
+  if (modelName == "Pose")
+    return new WbPose(original);
   if (modelName == "Propeller")
     return new WbPropeller(original);
   if (modelName == "Radar")
@@ -457,6 +496,8 @@ WbNode *WbConcreteNodeFactory::createCopy(const WbNode &original) {
     return new WbTrackWheel(original);
   if (modelName == "Transform")
     return new WbTransform(original);
+  if (modelName == "VacuumGripper")
+    return new WbVacuumGripper(original);
   if (modelName == "Viewpoint")
     return new WbViewpoint(original);
   if (modelName == "WorldInfo")
@@ -474,24 +515,4 @@ const QString WbConcreteNodeFactory::slotType(WbNode *node) {
 bool WbConcreteNodeFactory::validateExistingChildNode(const WbField *field, const WbNode *childNode, const WbNode *node,
                                                       bool isInBoundingObject, QString &errorMessage) const {
   return WbNodeUtilities::validateExistingChildNode(field, childNode, node, isInBoundingObject, errorMessage);
-}
-
-void WbConcreteNodeFactory::exportAsVrml(const WbNode *node, WbVrmlWriter &writer) {
-  if (node->nodeModelName() == "Plane") {
-    WbPlane plane(*node);
-    plane.write(writer);
-    return;
-  }
-  if (node->nodeModelName() == "Capsule") {
-    WbCapsule capsule(*node);
-    capsule.write(writer);
-    return;
-  }
-  if (node->nodeModelName() == "Mesh") {
-    WbMesh mesh(*node);
-    mesh.write(writer);
-    return;
-  }
-
-  assert(0);  // we should not reach this line
 }

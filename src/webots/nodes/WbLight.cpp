@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,11 +19,11 @@
 #include "WbMFColor.hpp"
 #include "WbNodeUtilities.hpp"
 #include "WbPerspective.hpp"
+#include "WbPose.hpp"
 #include "WbPreferences.hpp"
 #include "WbSFBool.hpp"
 #include "WbSFColor.hpp"
 #include "WbSFDouble.hpp"
-#include "WbTransform.hpp"
 #include "WbWorld.hpp"
 #include "WbWrenRenderingContext.hpp"
 
@@ -84,8 +84,9 @@ void WbLight::postFinalize() {
 }
 
 WbLight::~WbLight() {
+  cLights.removeOne(this);
+
   if (areWrenObjectsInitialized()) {
-    cLights.removeOne(this);
     applySceneAmbientColorToWren();
     if (!WbWorld::instance()->isCleaning())
       emit WbWrenRenderingContext::instance()->numberOfOnLightsChanged();
@@ -224,38 +225,18 @@ int WbLight::numberOfLightsCastingShadows() {
   return counter;
 }
 
-void WbLight::exportNodeFields(WbVrmlWriter &writer) const {
-  if (writer.isWebots()) {
-    WbBaseNode::exportNodeFields(writer);
-    return;
-  }
-
-  findField("on", true)->write(writer);
-  findField("color", true)->write(writer);
-  findField("intensity", true)->write(writer);
-  findField("ambientIntensity", true)->write(writer);
-  findField("castShadows", true)->write(writer);
-  if (writer.isX3d() && castShadows()) {
-    QMap<QString, QString> x3dExportParameters = WbWorld::instance()->perspective()->x3dExportParameters();
-    if (x3dExportParameters.contains("shadowMapSize"))
-      writer << " shadowMapSize=\'" << x3dExportParameters.value("shadowMapSize") << "\'";
-    else
-      writer << " shadowMapSize=\'" << defaultX3dShadowsParameter("shadowMapSize") << "\'";
-    if (x3dExportParameters.contains("shadowRadius") && !x3dExportParameters.value("shadowRadius").isEmpty())
-      writer << " shadowRadius=\'" << x3dExportParameters.value("shadowRadius") << "\'";
-    if (x3dExportParameters.contains("shadowBias") && !x3dExportParameters.value("shadowBias").isEmpty())
-      writer << " shadowBias=\'" << x3dExportParameters.value("shadowBias") << "\'";
-  }
+void WbLight::exportNodeFields(WbWriter &writer) const {
+  WbBaseNode::exportNodeFields(writer);
+  if (writer.isX3d())
+    findField("castShadows", true)->write(writer);
 }
 
-QString WbLight::defaultX3dShadowsParameter(const QString &parameterName) {
-  if (parameterName == "shadowMapSize")
-    return "2048";
-  else if (parameterName == "shadowFilterSize")
-    return "0";
-  else if (parameterName == "shadowsCascades")
-    return "0";
-  else if (parameterName == "shadowIntensity")
-    return "0.5";
-  return QString();
+QStringList WbLight::fieldsToSynchronizeWithX3D() const {
+  QStringList fields;
+  fields << "color"
+         << "on"
+         << "intensity"
+         << "ambientIntensity"
+         << "castShadows";
+  return fields;
 }

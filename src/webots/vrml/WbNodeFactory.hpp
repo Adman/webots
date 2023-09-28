@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,7 +28,7 @@
 class WbField;
 class WbNode;
 class WbTokenizer;
-class WbVrmlWriter;
+class WbWriter;
 
 class WbNodeFactory {
 public:
@@ -41,7 +41,7 @@ public:
   virtual WbNode *createNode(const QString &modelName, WbTokenizer *tokenizer = 0, WbNode *parentNode = NULL,
                              const QString *protoFilePath = NULL) = 0;
 
-  // create and return a copy of the a node
+  // create and return a copy of a node
   // the fields of the copy are initialized with the values found in the original
   // the copy will have the same model as the original
   virtual WbNode *createCopy(const WbNode &original) = 0;
@@ -49,7 +49,6 @@ public:
   virtual const QString slotType(WbNode *node) = 0;
   virtual bool validateExistingChildNode(const WbField *field, const WbNode *childNode, const WbNode *node,
                                          bool isInBoundingObject, QString &errorMessage) const = 0;
-  virtual void exportAsVrml(const WbNode *node, WbVrmlWriter &writer) = 0;
 
 protected:
   WbNodeFactory();

@@ -1,11 +1,11 @@
 /*
- * Copyright 1996-2021 Cyberbotics Ltd.
+ * Copyright 1996-2023 Cyberbotics Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -301,9 +301,6 @@ static void handleMessage(WbRequest *r, WbDeviceTag tag, WbNodeType type) {
                 break;
               case C_CAMERA_SET_FOCAL:
                 CALL_INTERFACE_FUNCTION(wbr_camera_set_focal_distance, tag, request_read_double(r));
-                break;
-              case C_CAMERA_GET_IMAGE:
-                wb_abstract_camera_update_timestamp(robot_get_device_with_node(tag, WB_NODE_CAMERA, true));
                 break;
               default:
                 REQUEST_ASSERT(0, tag, type, c);

@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,10 +28,12 @@ class WbSingleTaskApplication : public QObject {
   Q_OBJECT
 
 public:
-  explicit WbSingleTaskApplication(WbGuiApplication::Task task, const QString &taskArgument = QString(), QObject *parent = 0) :
+  explicit WbSingleTaskApplication(WbGuiApplication::Task task, const QStringList &taskArgument = QStringList(),
+                                   QObject *parent = 0, const QString &startupPath = QString()) :
     QObject(parent),
     mTask(task),
-    mTaskArgument(taskArgument) {}
+    mTaskArguments(taskArgument),
+    mStartupPath(startupPath) {}
 
 public slots:
   void run();
@@ -41,11 +43,12 @@ signals:
 
 private:
   WbGuiApplication::Task mTask;
-  QString mTaskArgument;
+  QStringList mTaskArguments;
+  QString mStartupPath;
 
+  void convertProto() const;
   void showHelp() const;
   void showSysInfo() const;
-  void updateProtoCacheFiles(const QString &path) const;
 };
 
 #endif

@@ -1,10 +1,10 @@
-// Copyright 1996-2021 Cyberbotics Ltd.
+// Copyright 1996-2023 Cyberbotics Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//     https://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -110,28 +110,28 @@ namespace wren {
 
     RenderQueueIterator partitionByVisibility(RenderQueueIterator first, RenderQueueIterator last);
     RenderQueueIterator partitionByViewability(RenderQueueIterator first, RenderQueueIterator last);
-    RenderQueueIterator partitionByTranslucency(RenderQueueIterator first, RenderQueueIterator last);
-    RenderQueueIterator partitionByUseMaterial(RenderQueueIterator first, RenderQueueIterator last);
-    RenderQueueIterator partitionByStencilProgram(RenderQueueIterator first, RenderQueueIterator last);
-    RenderQueueIterator partitionByShadowReceiving(RenderQueueIterator first, RenderQueueIterator last);
-    RenderQueueIterator partitionByZOrder(RenderQueueIterator first, RenderQueueIterator last);
+    static RenderQueueIterator partitionByTranslucency(RenderQueueIterator first, RenderQueueIterator last);
+    static RenderQueueIterator partitionByUseMaterial(RenderQueueIterator first, RenderQueueIterator last);
+    static RenderQueueIterator partitionByStencilProgram(RenderQueueIterator first, RenderQueueIterator last);
+    static RenderQueueIterator partitionByShadowReceiving(RenderQueueIterator first, RenderQueueIterator last);
+    static RenderQueueIterator partitionByZOrder(RenderQueueIterator first, RenderQueueIterator last);
 
     ShadowVolumeIterator partitionShadowsByVisibility(ShadowVolumeIterator first, ShadowVolumeIterator last, LightNode *light);
 
-    void sortRenderQueueByState(RenderQueueIterator first, RenderQueueIterator last);
+    static void sortRenderQueueByState(RenderQueueIterator first, RenderQueueIterator last);
     void sortRenderQueueByDistance(RenderQueueIterator first, RenderQueueIterator last);
 
-    void renderDefault(RenderQueueIterator first, RenderQueueIterator last, bool disableDepthTest = false);
-    void renderStencilPerLight(LightNode *light, RenderQueueIterator first, RenderQueueIterator firstShadwoReceiver,
+    static void renderDefault(RenderQueueIterator first, RenderQueueIterator last, bool disableDepthTest = false);
+    void renderStencilPerLight(LightNode *light, RenderQueueIterator first, RenderQueueIterator firstShadowReceiver,
                                RenderQueueIterator last);
     void renderStencilShadowVolumesDepthPass(ShadowVolumeCaster *shadowVolume, LightNode *light);
     void renderStencilShadowVolumesDepthFail(ShadowVolumeCaster *shadowVolume, LightNode *light);
-    void renderStencilAmbientEmissive(RenderQueueIterator first, RenderQueueIterator last);
-    void renderStencilDiffuseSpecular(RenderQueueIterator first, RenderQueueIterator last, LightNode *light,
-                                      bool applyShadows = true);
-    void renderStencilWithoutProgram(RenderQueueIterator first, RenderQueueIterator last);
+    static void renderStencilAmbientEmissive(RenderQueueIterator first, RenderQueueIterator last);
+    static void renderStencilDiffuseSpecular(RenderQueueIterator first, RenderQueueIterator last, LightNode *light,
+                                             bool applyShadows = true);
     void renderStencilFog(RenderQueueIterator first, RenderQueueIterator last);
-    void renderTranslucent(RenderQueueIterator first, RenderQueueIterator last, bool disableDepthTest = false);
+    static void renderStencilWithoutProgram(RenderQueueIterator first, RenderQueueIterator last);
+    static void renderTranslucent(RenderQueueIterator first, RenderQueueIterator last, bool disableDepthTest = false);
 
     static Scene *cInstance;
 

@@ -13,6 +13,20 @@ PROTO names should use upper camel case, e.g., each word should begin with a cap
 > **Note**: The PROTO file name should match exactly the PROTO name.
 For example the `SmallWoodenChair` PROTO should be defined in a file named `SmallWoodenChair.proto`.
 
+### Orientation
+
+PROTO nodes should be oriented in a way they appear nicely in a ENU coordinate system (which is the default in [WorldInfo](worldinfo.md)).
+If an object has at least two sides defined (for example up and front) it should be oriented using the FLU system:
+- **F**orward direction along the positive X-axis,
+- **L**eft direction along the positive Y-axis, and
+- **U**p direction along the positive Z-axis.
+
+Typical candidates for the FLU system are a TV set, a rubber duck, or a robot.
+Objects such as a flower pot don't have any front, back, right or left side.
+In such cases, only the up direction should be set correctly: the upright position should be along the positive Z-axis.
+Objects such as a soccer ball don't have any up, down, front, back, right or left side.
+In such cases, the orientation has no importance.
+
 ### Header
 
 The first line of a PROTO file is called the header.
@@ -29,15 +43,124 @@ For that purpose, the name of the license should be specified in the `license:` 
 #### Tags
 
 If needed, the `tags:` comment should be properly specified.
-It currently supports three possible options: `deprecated`, `hidden` and `static` which may be used simultaneously separated with a coma:
+It currently supports four possible options: `deprecated`, `hidden`, `nonDeterministic` and `no3dView` which may be used simultaneously separated with a coma:
 - `deprecated` means this PROTO should not be used any more in new simulations, but is kept for backwards compatibility. When using a deprecated PROTO, Webots will display a warning message about it.
 - `hidden` tells Webots not to display this PROTO in the Add Node dialog when the user wants to insert a new PROTO.
 Hidden PROTO nodes are typically used as sub-PROTO nodes, that is they are used from another PROTO file, but not directly from a world file.
-- `static` is described in the [Procedural PROTO nodes](procedural-proto-nodes.md) section.
+- `nonDeterministic` tells Webots that this PROTO may yield a different result with each execution.
+This is typically the case if randomness is involved in the execution of the PROTO, which most commonly occurs if a time-based seed is used in the random process.
+- `no3dView` tells [webots.cloud](https://webots.cloud/proto) not to load the 3D view when displaying the page of this PROTO.
 
 #### Documentation
 
 The `documentation url:` comment can be used to link to the PROTO documentation. The link will be displayed in the add node dialog and openned from the node help menu.
+
+#### Keywords
+
+The `keywords:` comment should be added to classify the proto correctly on [webots.cloud](https://webots.cloud/proto).
+The following keywords are available:
+```
+robot
+  - arm
+  - flying
+  - tracked
+  - legged
+  - wheeled
+  - other
+  - accessory
+  - extension
+sensor
+  - camera
+  - distance-sensor
+  - imu
+  - lidar
+  - radar
+  - range-finder
+actuator
+  - gripper
+  - motor
+  - other
+industrial
+  - cart
+  - container
+  - conveyor
+  - ironmongery
+  - light
+  - plumbing
+  - safety
+  - tool
+  - other
+household
+  - electronics
+  - hospital
+  - kitchen
+  - light
+  - living room
+  - potted plant
+  - school
+  - toy
+vehicle
+  - car
+  - farm
+  - public
+  - truck
+  - two wheels
+  - wheel
+  - steering
+  - other
+furniture
+  - bathroom
+  - bedroom
+  - chair
+  - kitchen
+  - laundry
+  - living room
+  - storage
+  - table
+building
+  - business
+  - civil
+  - component
+  - farm
+  - hotel
+  - house
+  - industry
+  - residential
+  - shop
+animal
+  - farm
+  - pet
+  - wild
+exterior
+  - garden
+  - obstacle
+  - sport
+  - street furniture
+  - tree
+traffic
+  - road
+  - sign
+appearance
+  - electronics
+  - fabric
+  - leather
+  - metal
+  - mineral
+  - other
+  - paint
+  - plastic
+  - rubber
+  - wood
+primitive
+  - background
+  - geometry
+  - ground
+  - joint
+```
+
+You should declare the keywords as follow:
+- If the proto fits in a category which has subcategories, you have to choose a subcategory. The syntax is then: `keywords:first level category/second level category`, for example: `keywords: robot/walking`.
+- If the robot fits in several categories, the different categories must be separated by a comma, for example: `keywords: vehicle/car, appearance/metal`.
 
 #### Description
 
@@ -54,9 +177,16 @@ It doesn't cover PROTO nodes derived from other primitives (such as geometries) 
 
 Real objects can be placed at different locations and orientations in the world.
 Therefore the corresponding PROTO should expose at least a `translation` and a `rotation` field to allow the users to move and rotate the object easily.
+
 The default value for the translation should be preferably the origin (0, 0, 0) and should correspond to the object in a normal position, e.g., laying on the floor rather than sinking into the floor.
 That means the origin of an object should not be at its 3D geometrical center, but rather in the middle of the surface in contact with the floor.
-The rotation axis should be already well positioned, e.g., usually vertical, so that when you rotate a building for example, you should simply change the angle value to have it rotate along its vertical axis.
+However, there are some exceptions to this rule:
+- Legged robots should have their origin in their main body as it is difficult to know the extension of the legs of the robot towards the floor.
+- Balls should have their origin at their geometrical center, as they can roll and don't have an upright position.
+- Devices that are directly derived from base nodes (e.g., Lidar, Camera, etc.) can have a default translation different from `0 0 0` so that the device shape rests on the ground when created even if the sensor itself is not located at the contact surface.
+- Any other object which doesn't have a clear or stable upright position.
+
+The rotation axis should be already well positioned, e.g., usually along the Z-axis with a 0 value for the angle, e.g., `0 0 1 0`, so that when you rotate a building for example, you should simply change the angle value to have it rotate along its vertical axis.
 
 #### "enableBoundingObject"
 
@@ -117,19 +247,18 @@ It is better to use more descriptive names, like `left arm pivot`.
 Here is a simple example of a good PROTO declaration (the implementation is not shown):
 
 ```
-#VRML_SIM R2020b utf8
+#VRML_SIM {{ webots.version.major }} utf8
 # license: Apache License 2.0
-# license url: http://www.apache.org/licenses/LICENSE-2.0
-# tags: static
+# license url: https://www.apache.org/licenses/LICENSE-2.0
 # A color pencil
 
-ColorPencil {
-  SFFloat    translation          0 0 0
-  SFRotation rotation             0 1 0 0
-  SFBool     enablePhysics        TRUE
-  SFBool     enableBoundingObject TRUE
-  SFColor    color                1 0 0     # defaults to red.
-  SFFloat    size                 0.2       # range in [0.02, 0.2].
-}
+PROTO ColorPencil [
+  field SFFloat    translation          0 0 0
+  field SFRotation rotation             0 0 1 0
+  field SFBool     enablePhysics        TRUE
+  field SFBool     enableBoundingObject TRUE
+  field SFColor    color                1 0 0     # defaults to red.
+  field SFFloat    size                 0.2       # range in [0.02, 0.2].
+]
 ...
 ```
